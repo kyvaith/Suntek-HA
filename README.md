@@ -1,27 +1,41 @@
 <p align="center">
-  <img src="https://sourcing-media.hktdc.com/original-file/da3e08e25338439faae35895ac1d3a3c?bucket=PUBLIC_ACCESS_MEDIA_BUCKET" alt="Suntek" width="220">
+  <img src="custom_components/suntek_lte_camera/brand/logo.png" alt="Suntek LTE Camera" width="160">
 </p>
 
 <h1 align="center">Suntek-HA</h1>
 
 <p align="center">
   <a href="https://www.home-assistant.io/"><img alt="Home Assistant" src="https://img.shields.io/badge/Home%20Assistant-custom%20integration-41BDF5?logo=homeassistant&logoColor=white"></a>
+  <a href="https://hacs.xyz/"><img alt="HACS" src="https://img.shields.io/badge/HACS-custom-orange"></a>
   <img alt="Trail camera" src="https://img.shields.io/badge/trail%20camera-LTE-green">
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white">
-  <a href="https://github.com/kyvaith/Suntek-HA"><img alt="GitHub repo" src="https://img.shields.io/badge/GitHub-kyvaith%2FSuntek--HA-181717?logo=github"></a>
+  <a href="https://github.com/kyvaith/Suntek-HA/releases"><img alt="Release" src="https://img.shields.io/github/v/release/kyvaith/Suntek-HA?display_name=tag"></a>
 </p>
 
 A Home Assistant custom integration for Suntek LTE trail cameras used for outdoor monitoring, wildlife observation, remote plots, feeders, and forest camera setups.
 
 ## Features
 
-- Checks whether the camera is online.
-- Wakes the camera through the Suntek cloud API.
-- Adds a Home Assistant wake-up button.
-- Provides the `suntek_lte_camera.wakeup` service.
-- Creates a camera entity that can use an RTSP, HLS, MJPEG, or local P2P bridge URL.
+- Adds a standard Home Assistant camera entity with a dashboard preview tile.
+- Lets you add the camera from the Home Assistant UI with login, password, and camera selection.
+- Checks whether the LTE trail camera is online.
+- Adds a wake-up button for the camera.
+- Provides the `suntek_lte_camera.wakeup` and `suntek_lte_camera.refresh` services.
 
-## Installation
+## Installation With HACS
+
+1. Open HACS in Home Assistant.
+2. Open the menu and choose Custom repositories.
+3. Add this repository URL:
+
+```text
+https://github.com/kyvaith/Suntek-HA
+```
+
+4. Select Integration as the category.
+5. Install Suntek LTE Camera.
+6. Restart Home Assistant.
+
+## Manual Installation
 
 Copy this directory:
 
@@ -35,34 +49,16 @@ to your Home Assistant config directory:
 config/custom_components/suntek_lte_camera
 ```
 
-Restart Home Assistant, then add the `Suntek LTE Camera` integration from Settings.
+Restart Home Assistant after copying the files.
 
 ## Configuration
 
-The camera `IMEI / device ID` is required. You can optionally provide the cloud password, Suntek server URL, and a stream URL template.
+In Home Assistant, go to Settings, Devices & services, Add integration, and search for Suntek LTE Camera.
 
-Default server:
+The setup flow asks for:
 
-```text
-https://depro.car-dv.com/4gcardv
-```
+- Login / IMEI
+- Password
+- Camera selection
 
-Example stream template:
-
-```text
-rtsp://192.0.2.10:8554/{device_id}
-```
-
-Available template variables:
-
-```text
-{device_id}
-{imei}
-{password}
-{server_addr}
-{av_server_addr}
-```
-
-## Live View Notes
-
-The SuntekCam mobile app uses a proprietary P2P protocol for the actual live video feed. This integration handles the cloud status API, wake-up command, and standard stream handoff. App-equivalent live view requires an RTSP/HLS/MJPEG URL from the camera or a local P2P bridge.
+After setup, Home Assistant creates the camera entity, online sensor, and wake-up button for the selected Suntek LTE trail camera.

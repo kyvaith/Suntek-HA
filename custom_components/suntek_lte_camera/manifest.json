@@ -1,10 +1,11 @@
 {
   "domain": "suntek_lte_camera",
   "name": "Suntek LTE Camera",
-  "codeowners": [],
+  "codeowners": ["@kyvaith"],
   "config_flow": true,
   "documentation": "https://github.com/kyvaith/Suntek-HA",
+  "issue_tracker": "https://github.com/kyvaith/Suntek-HA/issues",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

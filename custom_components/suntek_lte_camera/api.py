@@ -8,7 +8,7 @@ import json
 import logging
 import time
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 import aiohttp
 
@@ -19,6 +19,44 @@ _LOGGER = logging.getLogger(__name__)
 SERVER_COMMAND_SECRET = "8ac10106160c56f023a8063d5c"
 LEGACY_HTTP_SECRET = "dfs4132541df512sfd0"
 LEGACY_HTTPS_SECRET = "xme4x84lzd3dsfsfd0"
+
+_DEVICE_ID_KEYS = (
+    "imei",
+    "deviceid",
+    "device_id",
+    "deviceId",
+    "devId",
+    "did",
+    "sn",
+)
+_DEVICE_NAME_KEYS = (
+    "devicename",
+    "deviceName",
+    "name",
+    "nickname",
+    "nickName",
+    "alias",
+    "remark",
+)
+_DEVICE_SERVER_KEYS = (
+    "serveraddr",
+    "serverAddr",
+    "server_addr",
+    "server",
+    "serverUrl",
+)
+_IMAGE_URL_HINTS = (
+    "image",
+    "img",
+    "jpg",
+    "jpeg",
+    "photo",
+    "pic",
+    "preview",
+    "snapshot",
+    "thumb",
+)
+_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 class SuntekApiError(Exception):
@@ -100,6 +138,55 @@ def online_from_response(value: Any) -> bool | None:
     return None
 
 
+def devices_from_response(
+    value: Any, fallback_id: str, default_server_addr: str = DEFAULT_SERVER_ADDR
+) -> list[dict[str, str]]:
+    """Extract device choices from the different cloud response shapes."""
+    devices: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for item in _iter_device_mappings(value):
+        device_id = _first_mapping_value(item, _DEVICE_ID_KEYS)
+        if not device_id and _has_device_hint(item):
+            device_id = _first_mapping_value(item, ("id",))
+        if not device_id or device_id in seen:
+            continue
+
+        seen.add(device_id)
+        name = _first_mapping_value(item, _DEVICE_NAME_KEYS) or device_id
+        server_addr = (
+            _first_mapping_value(item, _DEVICE_SERVER_KEYS) or default_server_addr
+        )
+        devices.append(
+            {
+                "device_id": device_id,
+                "name": name,
+                "server_addr": server_addr,
+            }
+        )
+
+    if devices:
+        return devices
+
+    fallback_id = fallback_id.strip()
+    return [
+        {
+            "device_id": fallback_id,
+            "name": fallback_id,
+            "server_addr": default_server_addr,
+        }
+    ]
+
+
+def image_url_from_response(value: Any, base_url: str) -> str:
+    """Return the first likely preview image URL from a file-list response."""
+    for item in _iter_image_url_candidates(value):
+        url = _normalise_image_url(item, base_url)
+        if url:
+            return url
+    return ""
+
+
 def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -122,6 +209,77 @@ def _state_to_online(value: Any) -> bool | None:
         if value_l in {"offline", "off", "disconnected", "false", "0"}:
             return False
     return None
+
+
+def _iter_device_mappings(value: Any):
+    if isinstance(value, Mapping):
+        if _first_mapping_value(value, _DEVICE_ID_KEYS) or (
+            _first_mapping_value(value, ("id",)) and _has_device_hint(value)
+        ):
+            yield value
+
+        for item in value.values():
+            if isinstance(item, (Mapping, list)):
+                yield from _iter_device_mappings(item)
+
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_device_mappings(item)
+
+
+def _first_mapping_value(mapping: Mapping[str, Any], keys: tuple[str, ...]) -> str:
+    lower_mapping = {str(key).lower(): value for key, value in mapping.items()}
+    for key in keys:
+        value = lower_mapping.get(key.lower())
+        if value is None:
+            continue
+        value = str(value).strip()
+        if value:
+            return value
+    return ""
+
+
+def _has_device_hint(mapping: Mapping[str, Any]) -> bool:
+    keys = {str(key).lower() for key in mapping}
+    hint_keys = {key.lower() for key in (*_DEVICE_NAME_KEYS, *_DEVICE_SERVER_KEYS)}
+    return bool(keys & hint_keys) or any(
+        "device" in key or "imei" in key for key in keys
+    )
+
+
+def _iter_image_url_candidates(value: Any, key_hint: str = ""):
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _iter_image_url_candidates(item, str(key).lower())
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_image_url_candidates(item, key_hint)
+    elif isinstance(value, str) and _looks_like_image_url(value, key_hint):
+        yield value
+
+
+def _looks_like_image_url(value: str, key_hint: str) -> bool:
+    value_l = value.strip().lower().replace("\\", "/")
+    if not value_l.startswith(("http://", "https://", "/", "//")):
+        return False
+
+    path = value_l.split("?", 1)[0]
+    has_image_extension = any(
+        path.endswith(extension) for extension in _IMAGE_EXTENSIONS
+    )
+    has_image_hint = any(hint in key_hint for hint in _IMAGE_URL_HINTS)
+    return has_image_extension or has_image_hint
+
+
+def _normalise_image_url(value: str, base_url: str) -> str:
+    value = value.strip().replace("\\", "/")
+    if not value:
+        return ""
+    if value.startswith("//"):
+        return f"https:{value}"
+    if value.startswith(("http://", "https://")):
+        return value
+    return urljoin(f"{_strip_trailing_slash(base_url)}/", value)
 
 
 class SuntekCloudClient:
@@ -221,6 +379,11 @@ class SuntekCloudClient:
         )
         return await self._async_get_json(url)
 
+    async def async_discover_devices(self) -> list[dict[str, str]]:
+        """Return camera choices for the config flow."""
+        response = await self.async_query_device(self.password)
+        return devices_from_response(response, self.device_id, self.server_addr)
+
     async def async_query_files(
         self, page: int = 1, page_size: int = 20
     ) -> dict[str, Any]:
@@ -236,6 +399,14 @@ class SuntekCloudClient:
             f"{self.server_addr}/msgfileApi/api/queryFiles",
         )
         return await self._async_get_json(url)
+
+    async def async_fetch_latest_image(self) -> bytes:
+        """Fetch the latest cloud preview image when the file list exposes one."""
+        response = await self.async_query_files(page=1, page_size=10)
+        image_url = image_url_from_response(response, self.server_addr)
+        if not image_url:
+            raise SuntekApiError("No preview image URL found in the file list")
+        return await self.async_fetch_bytes(image_url)
 
     async def async_fetch_bytes(self, url: str) -> bytes:
         """Fetch bytes for a still-image URL."""
@@ -275,4 +446,3 @@ class SuntekCloudClient:
         if isinstance(parsed, dict):
             return parsed
         return {"data": parsed}
-

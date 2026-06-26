@@ -9,6 +9,7 @@ DEFAULT_WAKE_COOLDOWN = 60
 DEFAULT_SCAN_INTERVAL = 60
 
 CONF_DEVICE_ID = "device_id"
+CONF_LOGIN = "login"
 CONF_NAME = "name"
 CONF_PASSWORD = "password"
 CONF_SERVER_ADDR = "server_addr"
@@ -26,4 +27,3 @@ SERVICE_WAKEUP = "wakeup"
 
 DATA_CLIENT = "client"
 DATA_COORDINATOR = "coordinator"
-

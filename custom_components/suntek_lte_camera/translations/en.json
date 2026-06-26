@@ -3,17 +3,17 @@
     "step": {
       "user": {
         "title": "Suntek LTE Camera",
-        "description": "Add the SuntekCam cloud wakeup/status API. Live video needs a direct RTSP/HLS/MJPEG URL or a local P2P bridge URL.",
+        "description": "Enter the same login and password used for your SuntekCam trail camera. The next step lets you pick the camera.",
         "data": {
-          "device_id": "IMEI / device ID",
-          "name": "Name",
-          "password": "Cloud password",
-          "server_addr": "Cloud server base URL",
-          "stream_url_template": "Stream URL template",
-          "still_image_url_template": "Still image URL template",
-          "wake_before_stream": "Wake camera before stream",
-          "wake_cooldown": "Wake cooldown seconds",
-          "scan_interval": "Status scan interval seconds"
+          "login": "Login / IMEI",
+          "password": "Password"
+        }
+      },
+      "select_device": {
+        "title": "Select camera",
+        "description": "Choose the Suntek LTE trail camera to add to Home Assistant.",
+        "data": {
+          "device_id": "Camera"
         }
       }
     },
@@ -26,11 +26,6 @@
       "init": {
         "title": "Suntek LTE Camera options",
         "data": {
-          "password": "Cloud password",
-          "server_addr": "Cloud server base URL",
-          "stream_url_template": "Stream URL template",
-          "still_image_url_template": "Still image URL template",
-          "wake_before_stream": "Wake camera before stream",
           "wake_cooldown": "Wake cooldown seconds",
           "scan_interval": "Status scan interval seconds"
         }
@@ -55,4 +50,3 @@
     }
   }
 }
-

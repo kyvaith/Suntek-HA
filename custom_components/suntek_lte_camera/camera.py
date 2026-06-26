@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
@@ -24,6 +25,7 @@ from .coordinator import SuntekRuntimeData
 from .entity import device_info, entry_value
 
 _LOGGER = logging.getLogger(__name__)
+_FALLBACK_IMAGE = Path(__file__).parent / "brand" / "logo.png"
 
 
 async def async_setup_entry(
@@ -35,15 +37,11 @@ async def async_setup_entry(
 
 
 class SuntekCamera(CoordinatorEntity, Camera):
-    """Suntek camera entity.
-
-    The APK receives live frames through a proprietary P2P library. This entity
-    wakes the camera and hands Home Assistant an RTSP/HLS/MJPEG URL if one is
-    configured, for example from a local P2P bridge.
-    """
+    """Suntek camera entity for the Home Assistant camera dashboard tile."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "camera"
+    _attr_content_type = "image/png"
 
     def __init__(self, runtime: SuntekRuntimeData, entry: ConfigEntry) -> None:
         super().__init__(runtime.coordinator)
@@ -56,6 +54,11 @@ class SuntekCamera(CoordinatorEntity, Camera):
             if entry_value(entry, CONF_STREAM_URL_TEMPLATE, "")
             else CameraEntityFeature(0)
         )
+
+    @property
+    def available(self) -> bool:
+        """Keep the camera tile available even when LTE status polling is offline."""
+        return True
 
     async def stream_source(self) -> str | None:
         """Return the configured stream URL after optionally waking the camera."""
@@ -79,15 +82,29 @@ class SuntekCamera(CoordinatorEntity, Camera):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return a still image if a still-image URL template is configured."""
+        """Return a still image for Home Assistant camera previews."""
         template = entry_value(self._entry, CONF_STILL_IMAGE_URL_TEMPLATE, "")
         if not template:
-            return None
+            return await self._async_latest_or_fallback_image()
 
         try:
             url = self._runtime.client.render_url_template(template)
             return await self._runtime.client.async_fetch_bytes(url)
         except SuntekApiError as err:
             _LOGGER.warning("Suntek still image fetch failed: %s", err)
-            return None
+            return await self._async_latest_or_fallback_image()
 
+    async def _async_latest_or_fallback_image(self) -> bytes | None:
+        try:
+            return await self._runtime.client.async_fetch_latest_image()
+        except SuntekApiError as err:
+            _LOGGER.debug("Suntek latest image fetch failed: %s", err)
+            return await self.hass.async_add_executor_job(_read_fallback_image)
+
+
+def _read_fallback_image() -> bytes | None:
+    try:
+        return _FALLBACK_IMAGE.read_bytes()
+    except OSError as err:
+        _LOGGER.warning("Suntek fallback image is unavailable: %s", err)
+        return None
