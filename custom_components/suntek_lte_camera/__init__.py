@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
 
+from homeassistant.components import frontend
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -31,7 +34,17 @@ from .coordinator import SuntekDataUpdateCoordinator, SuntekRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.CAMERA, Platform.BUTTON, Platform.BINARY_SENSOR]
+FRONTEND_DIR = Path(__file__).parent / "frontend"
+FRONTEND_URL = f"/{DOMAIN}/frontend"
+FRONTEND_CARD = "suntek-camera-card.js"
+FRONTEND_CARD_URL = f"{FRONTEND_URL}/{FRONTEND_CARD}?v=0.3.0"
+
+PLATFORMS: list[Platform] = [
+    Platform.CAMERA,
+    Platform.BUTTON,
+    Platform.BINARY_SENSOR,
+    Platform.SENSOR,
+]
 
 WAKEUP_SCHEMA = vol.Schema(
     {
@@ -48,6 +61,7 @@ REFRESH_SCHEMA = vol.Schema({vol.Optional(ATTR_ENTRY_ID): cv.string})
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up services for Suntek LTE Camera."""
     hass.data.setdefault(DOMAIN, {})
+    await _async_register_frontend(hass)
 
     async def handle_wakeup(call: ServiceCall) -> None:
         content = call.data[ATTR_CONTENT]
@@ -122,3 +136,13 @@ def _iter_runtime_data(
 def _entry_value(entry: ConfigEntry, key: str, default: Any = None) -> Any:
     return entry.options.get(key, entry.data.get(key, default))
 
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(FRONTEND_URL, str(FRONTEND_DIR), False)]
+    )
+
+    try:
+        frontend.add_extra_js_url(hass, FRONTEND_CARD_URL)
+    except AttributeError:
+        _LOGGER.debug("Home Assistant frontend module registration is unavailable")

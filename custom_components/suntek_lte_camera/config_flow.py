@@ -54,8 +54,13 @@ class SuntekConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not errors:
                 self._login = values[CONF_LOGIN]
                 self._password = values[CONF_PASSWORD]
-                self._devices = await self._async_discover_devices()
-                return await self.async_step_select_device()
+                try:
+                    self._devices = await self._async_discover_devices()
+                except SuntekApiError as err:
+                    _LOGGER.debug("Suntek device validation failed: %s", err)
+                    errors["base"] = _flow_error_from_exception(err)
+                else:
+                    return await self.async_step_select_device()
 
         return self.async_show_form(
             step_id="user",
@@ -112,13 +117,7 @@ class SuntekConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             server_addr=DEFAULT_SERVER_ADDR,
             password=self._password,
         )
-        try:
-            devices = await client.async_discover_devices()
-        except SuntekApiError as err:
-            _LOGGER.debug(
-                "Suntek device discovery failed, using login as IMEI: %s", err
-            )
-            devices = []
+        devices = await client.async_discover_devices()
         return _normalise_devices(devices, self._login)
 
     @staticmethod
@@ -245,3 +244,12 @@ def _clean_input(values: dict[str, Any]) -> dict[str, Any]:
     for key, value in values.items():
         cleaned[key] = value.strip() if isinstance(value, str) else value
     return cleaned
+
+
+def _flow_error_from_exception(err: SuntekApiError) -> str:
+    message = str(err).lower()
+    if "illegal device" in message or "not found" in message:
+        return "invalid_device"
+    if "timeout" in message:
+        return "cannot_connect"
+    return "cannot_validate"

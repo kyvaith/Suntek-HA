@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 import hashlib
 import json
 import logging
@@ -115,6 +116,15 @@ def legacy_signed_url(params: Mapping[str, Any], url: str) -> str:
 
 def online_from_response(value: Any) -> bool | None:
     """Best-effort online extraction from different server response shapes."""
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, int | float):
+        return value > 0
+
+    if isinstance(value, str):
+        return _state_to_online(value)
+
     if isinstance(value, Mapping):
         for key, item in value.items():
             key_l = str(key).lower()
@@ -153,7 +163,7 @@ def devices_from_response(
             continue
 
         seen.add(device_id)
-        name = _first_mapping_value(item, _DEVICE_NAME_KEYS) or device_id
+        name = _device_display_name(item, device_id)
         server_addr = (
             _first_mapping_value(item, _DEVICE_SERVER_KEYS) or default_server_addr
         )
@@ -185,6 +195,18 @@ def image_url_from_response(value: Any, base_url: str) -> str:
         if url:
             return url
     return ""
+
+
+def raise_for_ret_code(value: Mapping[str, Any]) -> None:
+    """Raise a readable error for Suntek API retCode failures."""
+    code = value.get("retCode")
+    if code in (None, 0, "0"):
+        return
+
+    message = str(value.get("message") or value.get("msg") or "").strip()
+    if not message:
+        message = f"Suntek API returned retCode {code}"
+    raise SuntekApiError(message)
 
 
 def _truthy(value: Any) -> bool:
@@ -247,6 +269,19 @@ def _has_device_hint(mapping: Mapping[str, Any]) -> bool:
     )
 
 
+def _device_display_name(mapping: Mapping[str, Any], device_id: str) -> str:
+    name = _first_mapping_value(mapping, _DEVICE_NAME_KEYS)
+    if name:
+        return name
+
+    imei = _first_mapping_value(mapping, ("imei",))
+    cloud_id = _first_mapping_value(mapping, ("deviceid", "device_id", "deviceId"))
+    if imei and cloud_id and device_id == imei:
+        return cloud_id
+
+    return device_id
+
+
 def _iter_image_url_candidates(value: Any, key_hint: str = ""):
     if isinstance(value, Mapping):
         for key, item in value.items():
@@ -299,6 +334,7 @@ class SuntekCloudClient:
         self.password = password or ""
         self.timeout = timeout
         self._last_wakeup = 0.0
+        self.last_wakeup: dict[str, Any] = {"state": "never"}
 
     @property
     def av_server_addr(self) -> str:
@@ -325,7 +361,9 @@ class SuntekCloudClient:
             f"{self.av_server_addr}:1888/api/device/checkOnline"
             f"?deviceId={_encode_param(self.device_id)}&sign={signature}"
         )
-        return await self._async_get_json(url)
+        data = await self._async_get_json(url)
+        raise_for_ret_code(data)
+        return data
 
     async def async_send_server_command(
         self, content: int = DEFAULT_WAKE_COMMAND
@@ -338,7 +376,9 @@ class SuntekCloudClient:
             f"?deviceId={_encode_param(self.device_id)}"
             f"&content={content}&sign={signature}"
         )
-        return await self._async_get_json(url)
+        data = await self._async_get_json(url)
+        raise_for_ret_code(data)
+        return data
 
     async def async_wakeup(
         self,
@@ -352,8 +392,22 @@ class SuntekCloudClient:
         if not force and cooldown > 0 and now - self._last_wakeup < cooldown:
             return {"skipped": True, "reason": "cooldown"}
 
-        data = await self.async_send_server_command(content)
+        try:
+            data = await self.async_send_server_command(content)
+        except SuntekApiError as err:
+            self.last_wakeup = {
+                "state": "error",
+                "at": datetime.now(UTC).isoformat(),
+                "error": str(err),
+            }
+            raise
+
         self._last_wakeup = now
+        self.last_wakeup = {
+            "state": "sent",
+            "at": datetime.now(UTC).isoformat(),
+            "response": data,
+        }
         return data
 
     async def async_query_cloud_password(self) -> dict[str, Any]:
@@ -365,7 +419,9 @@ class SuntekCloudClient:
             },
             f"{self.server_addr}/msgfileApi/api/queryPassword",
         )
-        return await self._async_get_json(url)
+        data = await self._async_get_json(url)
+        raise_for_ret_code(data)
+        return data
 
     async def async_query_device(self, password: str | None = None) -> dict[str, Any]:
         """Query device metadata from the 4gcardv cloud."""
@@ -377,7 +433,11 @@ class SuntekCloudClient:
             },
             f"{self.server_addr}/msgfileApi/api/queryDevice",
         )
-        return await self._async_get_json(url)
+        data = await self._async_get_json(url)
+        raise_for_ret_code(data)
+        if not data.get("data"):
+            raise SuntekApiError("Device was not found")
+        return data
 
     async def async_discover_devices(self) -> list[dict[str, str]]:
         """Return camera choices for the config flow."""
@@ -398,7 +458,9 @@ class SuntekCloudClient:
             },
             f"{self.server_addr}/msgfileApi/api/queryFiles",
         )
-        return await self._async_get_json(url)
+        data = await self._async_get_json(url)
+        raise_for_ret_code(data)
+        return data
 
     async def async_fetch_latest_image(self) -> bytes:
         """Fetch the latest cloud preview image when the file list exposes one."""

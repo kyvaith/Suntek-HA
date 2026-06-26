@@ -3,9 +3,10 @@
   "name": "Suntek LTE Camera",
   "codeowners": ["@kyvaith"],
   "config_flow": true,
+  "dependencies": ["frontend", "http"],
   "documentation": "https://github.com/kyvaith/Suntek-HA",
   "issue_tracker": "https://github.com/kyvaith/Suntek-HA/issues",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

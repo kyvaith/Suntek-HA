@@ -18,6 +18,9 @@
       }
     },
     "error": {
+      "cannot_connect": "Could not connect to the Suntek cloud. Try again later.",
+      "cannot_validate": "Could not validate this camera with the Suntek cloud.",
+      "invalid_device": "The Suntek cloud did not find this camera. Check the login / IMEI.",
       "required": "This field is required"
     }
   },
@@ -46,6 +49,11 @@
     "binary_sensor": {
       "online": {
         "name": "Online"
+      }
+    },
+    "sensor": {
+      "last_wakeup": {
+        "name": "Last wake-up"
       }
     }
   }
