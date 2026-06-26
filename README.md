@@ -11,49 +11,49 @@
   <a href="https://github.com/kyvaith/Suntek-HA"><img alt="GitHub repo" src="https://img.shields.io/badge/GitHub-kyvaith%2FSuntek--HA-181717?logo=github"></a>
 </p>
 
-Integracja Home Assistant dla kamer leśnych Suntek LTE, czyli trail camera używanych do monitoringu terenu, działki, lasu albo karmiska.
+A Home Assistant custom integration for Suntek LTE trail cameras used for outdoor monitoring, wildlife observation, remote plots, feeders, and forest camera setups.
 
-## Funkcje
+## Features
 
-- sprawdzanie, czy kamera jest online,
-- wybudzanie kamery przez chmurę Suntek,
-- przycisk `Wybudź` w Home Assistant,
-- usługa `suntek_lte_camera.wakeup`,
-- encja kamery z obsługą URL RTSP/HLS/MJPEG albo lokalnego bridge'a P2P.
+- Checks whether the camera is online.
+- Wakes the camera through the Suntek cloud API.
+- Adds a Home Assistant wake-up button.
+- Provides the `suntek_lte_camera.wakeup` service.
+- Creates a camera entity that can use an RTSP, HLS, MJPEG, or local P2P bridge URL.
 
-## Instalacja
+## Installation
 
-Skopiuj katalog:
+Copy this directory:
 
 ```text
 custom_components/suntek_lte_camera
 ```
 
-do:
+to your Home Assistant config directory:
 
 ```text
 config/custom_components/suntek_lte_camera
 ```
 
-Następnie zrestartuj Home Assistant i dodaj integrację `Suntek LTE Camera` z poziomu ustawień.
+Restart Home Assistant, then add the `Suntek LTE Camera` integration from Settings.
 
-## Konfiguracja
+## Configuration
 
-Wymagane jest `IMEI / ID urządzenia`. Opcjonalnie możesz podać hasło cloud, adres serwera Suntek oraz szablon URL streamu.
+The camera `IMEI / device ID` is required. You can optionally provide the cloud password, Suntek server URL, and a stream URL template.
 
-Domyślny serwer:
+Default server:
 
 ```text
 https://depro.car-dv.com/4gcardv
 ```
 
-Przykład szablonu streamu:
+Example stream template:
 
 ```text
 rtsp://192.0.2.10:8554/{device_id}
 ```
 
-Dostępne zmienne w szablonach:
+Available template variables:
 
 ```text
 {device_id}
@@ -63,6 +63,6 @@ Dostępne zmienne w szablonach:
 {av_server_addr}
 ```
 
-## Uwaga o live view
+## Live View Notes
 
-Aplikacja SuntekCam używa zamkniętego protokołu P2P do właściwego obrazu na żywo. Ta integracja obsługuje część chmurową, wybudzanie oraz podłączenie standardowego streamu. Pełny live view jak w aplikacji wymaga URL RTSP/HLS/MJPEG z kamery albo lokalnego bridge'a P2P.
+The SuntekCam mobile app uses a proprietary P2P protocol for the actual live video feed. This integration handles the cloud status API, wake-up command, and standard stream handoff. App-equivalent live view requires an RTSP/HLS/MJPEG URL from the camera or a local P2P bridge.
