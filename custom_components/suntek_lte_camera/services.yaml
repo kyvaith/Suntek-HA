@@ -18,7 +18,7 @@ wakeup:
 
 refresh:
   name: Refresh
-  description: Refresh the Suntek online status sensor.
+  description: Refresh the Suntek cloud connection and camera status sensors.
   fields:
     entry_id:
       name: Entry ID
@@ -26,3 +26,33 @@ refresh:
       selector:
         text:
 
+sync_cloud_media:
+  name: Sync cloud media
+  description: Copy photos and videos from the Suntek cloud into Home Assistant local media.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional Home Assistant config entry ID. If omitted, all Suntek cameras are synchronized.
+      selector:
+        text:
+    limit:
+      name: Limit
+      description: Maximum number of newest cloud media files to check.
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 1000
+          mode: box
+    include_images:
+      name: Include images
+      description: Copy image files from cloud storage.
+      default: true
+      selector:
+        boolean:
+    include_videos:
+      name: Include videos
+      description: Copy video files from cloud storage.
+      default: true
+      selector:
+        boolean:

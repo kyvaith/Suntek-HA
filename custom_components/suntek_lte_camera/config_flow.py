@@ -15,11 +15,17 @@ from .const import (
     CONF_CLOUD_DEVICE_ID,
     CONF_DEVICE_ID,
     CONF_LOGIN,
+    CONF_MEDIA_BACKUP_ENABLED,
+    CONF_MEDIA_BACKUP_INCLUDE_VIDEOS,
+    CONF_MEDIA_BACKUP_INTERVAL,
+    CONF_MEDIA_BACKUP_LIMIT,
     CONF_NAME,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_SERVER_ADDR,
     CONF_WAKE_COOLDOWN,
+    DEFAULT_MEDIA_BACKUP_INTERVAL,
+    DEFAULT_MEDIA_BACKUP_LIMIT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SERVER_ADDR,
     DEFAULT_WAKE_COOLDOWN,
@@ -170,6 +176,24 @@ def _options_schema(values: dict[str, Any]) -> vol.Schema:
                 CONF_SCAN_INTERVAL,
                 default=values.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
             ): vol.All(vol.Coerce(int), vol.Range(min=10)),
+            vol.Optional(
+                CONF_MEDIA_BACKUP_ENABLED,
+                default=values.get(CONF_MEDIA_BACKUP_ENABLED, False),
+            ): bool,
+            vol.Optional(
+                CONF_MEDIA_BACKUP_INTERVAL,
+                default=values.get(
+                    CONF_MEDIA_BACKUP_INTERVAL, DEFAULT_MEDIA_BACKUP_INTERVAL
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=15)),
+            vol.Optional(
+                CONF_MEDIA_BACKUP_LIMIT,
+                default=values.get(CONF_MEDIA_BACKUP_LIMIT, DEFAULT_MEDIA_BACKUP_LIMIT),
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
+            vol.Optional(
+                CONF_MEDIA_BACKUP_INCLUDE_VIDEOS,
+                default=values.get(CONF_MEDIA_BACKUP_INCLUDE_VIDEOS, True),
+            ): bool,
         }
     )
 

@@ -10,9 +10,17 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import SuntekApiError
-from .const import CONF_DEVICE_ID, DEFAULT_WAKE_COMMAND, DOMAIN
+from .const import (
+    CONF_DEVICE_ID,
+    CONF_MEDIA_BACKUP_INCLUDE_VIDEOS,
+    CONF_MEDIA_BACKUP_LIMIT,
+    DEFAULT_MEDIA_BACKUP_LIMIT,
+    DEFAULT_WAKE_COMMAND,
+    DOMAIN,
+)
 from .coordinator import SuntekRuntimeData
-from .entity import device_info
+from .entity import device_info, entry_value
+from .media import async_sync_cloud_media
 
 
 async def async_setup_entry(
@@ -20,7 +28,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up button entities."""
     runtime: SuntekRuntimeData = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([SuntekWakeButton(runtime, entry)])
+    async_add_entities(
+        [
+            SuntekWakeButton(runtime, entry),
+            SuntekSyncCloudMediaButton(runtime, entry),
+        ]
+    )
 
 
 class SuntekWakeButton(CoordinatorEntity, ButtonEntity):
@@ -51,3 +64,46 @@ class SuntekWakeButton(CoordinatorEntity, ButtonEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         """Expose the last cloud response for quick troubleshooting."""
         return self._runtime.client.last_wakeup
+
+
+class SuntekSyncCloudMediaButton(CoordinatorEntity, ButtonEntity):
+    """Button that copies cloud photos and videos into local HA media."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "sync_cloud_media"
+
+    def __init__(self, runtime: SuntekRuntimeData, entry: ConfigEntry) -> None:
+        super().__init__(runtime.coordinator)
+        self._runtime = runtime
+        self._entry = entry
+        self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_sync_cloud_media"
+        self._attr_device_info = device_info(entry)
+
+    async def async_press(self) -> None:
+        """Synchronize cloud media."""
+        try:
+            await async_sync_cloud_media(
+                self.hass,
+                self._runtime,
+                limit=int(
+                    entry_value(
+                        self._entry,
+                        CONF_MEDIA_BACKUP_LIMIT,
+                        DEFAULT_MEDIA_BACKUP_LIMIT,
+                    )
+                ),
+                include_images=True,
+                include_videos=bool(
+                    entry_value(self._entry, CONF_MEDIA_BACKUP_INCLUDE_VIDEOS, True)
+                ),
+            )
+        except SuntekApiError as err:
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Suntek cloud media sync failed: {err}") from err
+
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Expose the last media sync result."""
+        return self._runtime.last_media_sync

@@ -21,15 +21,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensor entities."""
     runtime: SuntekRuntimeData = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([SuntekOnlineSensor(runtime, entry)])
+    async_add_entities([SuntekCloudConnectionSensor(runtime, entry)])
 
 
-class SuntekOnlineSensor(CoordinatorEntity, BinarySensorEntity):
-    """Connectivity sensor based on /checkOnline."""
+class SuntekCloudConnectionSensor(CoordinatorEntity, BinarySensorEntity):
+    """Cloud command endpoint connectivity sensor."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_has_entity_name = True
-    _attr_translation_key = "online"
+    _attr_translation_key = "cloud_connection"
 
     def __init__(self, runtime: SuntekRuntimeData, entry: ConfigEntry) -> None:
         super().__init__(runtime.coordinator)
@@ -39,7 +39,6 @@ class SuntekOnlineSensor(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
-        """Return online state, or unknown when the response shape is unclear."""
+        """Return whether the Suntek command cloud endpoint responded."""
         data = self.coordinator.data or {}
-        return data.get("online")
-
+        return data.get("cloud_connected")

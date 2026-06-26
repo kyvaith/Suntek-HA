@@ -62,6 +62,7 @@ _IMAGE_URL_HINTS = (
     "thumb",
 )
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi")
 
 
 class SuntekApiError(Exception):
@@ -219,16 +220,64 @@ def devices_from_response(
 
 def image_url_from_response(value: Any, base_url: str) -> str:
     """Return the first likely preview image URL from a file-list response."""
-    for item in _iter_file_mappings(value):
-        image_url = _image_url_from_file_mapping(item, base_url)
-        if image_url:
-            return image_url
+    for item in cloud_files_from_response(value, base_url):
+        if item["media_type"] == "image":
+            return str(item["download_url"])
 
     for item in _iter_image_url_candidates(value):
         url = _normalise_image_url(item, base_url)
         if url:
             return url
     return ""
+
+
+def cloud_files_from_response(value: Any, base_url: str) -> list[dict[str, Any]]:
+    """Extract cloud media records from queryFiles responses."""
+    files: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for item in _iter_file_mappings(value):
+        media = _media_from_file_mapping(item, base_url)
+        if not media:
+            continue
+
+        dedupe_key = str(media["download_url"])
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        files.append(media)
+
+    return files
+
+
+def device_status_from_response(value: Any) -> dict[str, Any]:
+    """Parse the compact Suntek config string into Home Assistant-friendly data."""
+    config = _config_from_response(value)
+    if not config:
+        return {}
+
+    status: dict[str, Any] = {}
+    status["signal"] = _int_or_none(config.get("10"))
+    status["battery"] = _int_or_none(config.get("11"))
+    status["sd_used"], status["sd_total"], status["sd_percent"] = _parse_sd(
+        config.get("12", "")
+    )
+    status["model"] = _blank_to_none(config.get("13"))
+    status["firmware"] = _blank_to_none(config.get("14"))
+    status["modem_firmware"] = _blank_to_none(config.get("79"))
+    status["last_communication"] = _parse_timestamp(
+        config.get("15") or config.get("18")
+    )
+    status["temperature"] = _int_or_none(config.get("17"))
+    status["apn"] = _blank_to_none(config.get("42"))
+    status["latitude"] = _float_or_none(config.get("47"))
+    status["longitude"] = _float_or_none(config.get("48"))
+    status["position_valid"] = _truthy(config.get("49"))
+    status["video_resolution"] = _video_resolution(config.get("21"))
+    status["video_length"] = _int_or_none(config.get("26"))
+    status["upload_target"] = _upload_target(config.get("32"))
+    status["schedule"] = _format_schedule(config.get("33"))
+    return status
 
 
 def raise_for_ret_code(value: Mapping[str, Any]) -> None:
@@ -341,17 +390,57 @@ def _iter_file_mappings(value: Any):
             yield from _iter_file_mappings(item)
 
 
-def _image_url_from_file_mapping(mapping: Mapping[str, Any], base_url: str) -> str:
-    candidates = (
-        _first_mapping_value(mapping, ("reducefileurl", "thumbnail", "thumburl")),
-        _first_mapping_value(mapping, ("fileurl", "url")),
+def _media_from_file_mapping(
+    mapping: Mapping[str, Any], base_url: str
+) -> dict[str, Any] | None:
+    file_url = _first_mapping_value(mapping, ("fileurl", "url"))
+    preview_url = _first_mapping_value(
+        mapping, ("reducefileurl", "thumbnail", "thumburl")
     )
-    for candidate in candidates:
-        if not candidate:
-            continue
-        if _looks_like_image_url(candidate, "fileurl"):
-            return _normalise_image_url(candidate, base_url)
-    return ""
+    media_type = _media_type(mapping, file_url, preview_url)
+    download_url = preview_url if media_type == "image" and preview_url else file_url
+    if not download_url:
+        return None
+
+    normalised_download_url = _normalise_image_url(download_url, base_url)
+    normalised_file_url = _normalise_image_url(file_url, base_url) if file_url else ""
+    normalised_preview_url = (
+        _normalise_image_url(preview_url, base_url) if preview_url else ""
+    )
+    return {
+        "id": str(mapping.get("id") or ""),
+        "device_id": str(mapping.get("deviceid") or ""),
+        "file_type": mapping.get("filetype"),
+        "media_type": media_type,
+        "file_url": normalised_file_url,
+        "preview_url": normalised_preview_url,
+        "download_url": normalised_download_url,
+        "file_name": _file_name_from_url(normalised_file_url or normalised_download_url),
+        "upload_time": str(mapping.get("uploadtime") or ""),
+        "created_at": str(mapping.get("createtime") or ""),
+        "size": mapping.get("filesize"),
+        "latitude": _float_or_none(mapping.get("lat")),
+        "longitude": _float_or_none(mapping.get("lon")),
+    }
+
+
+def _media_type(mapping: Mapping[str, Any], file_url: str, preview_url: str) -> str:
+    file_type = str(mapping.get("filetype") or "").strip()
+    if file_type == "1":
+        return "image"
+    if file_type == "2":
+        return "video"
+
+    url_l = (file_url or preview_url).lower().split("?", 1)[0]
+    if any(url_l.endswith(extension) for extension in _VIDEO_EXTENSIONS):
+        return "video"
+    return "image"
+
+
+def _file_name_from_url(url: str) -> str:
+    path = urlparse(url).path
+    name = path.rsplit("/", 1)[-1]
+    return name or "suntek-media"
 
 
 def _looks_like_image_url(value: str, key_hint: str) -> bool:
@@ -376,6 +465,113 @@ def _normalise_image_url(value: str, base_url: str) -> str:
     if value.startswith(("http://", "https://")):
         return value
     return urljoin(f"{normalise_server_addr(base_url)}/", value)
+
+
+def _config_from_response(value: Any) -> dict[str, str]:
+    if isinstance(value, Mapping):
+        config_value = value.get("config")
+        if isinstance(config_value, str):
+            return _parse_config_string(config_value)
+
+        for key in ("data", "device", "result"):
+            parsed = _config_from_response(value.get(key))
+            if parsed:
+                return parsed
+
+    return {}
+
+
+def _parse_config_string(value: str) -> dict[str, str]:
+    config: dict[str, str] = {}
+    for part in value.split("#"):
+        if "=" not in part:
+            continue
+        key, item = part.split("=", 1)
+        key = key.strip()
+        if key:
+            config[key] = item.strip()
+    return config
+
+
+def _parse_sd(value: str) -> tuple[int | None, int | None, int | None]:
+    if "|" not in value:
+        return None, None, _int_or_none(value)
+
+    used_raw, total_raw = value.split("|", 1)
+    used = _int_or_none(used_raw)
+    total = _int_or_none(total_raw)
+    if used is None or total in (None, 0):
+        return used, total, None
+    return used, total, round(used / total * 100)
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+
+    value = str(value).strip()
+    try:
+        if len(value) == 14 and value.isdigit():
+            return datetime.strptime(value, "%Y%m%d%H%M%S").replace(tzinfo=UTC)
+        if value.isdigit():
+            return datetime.fromtimestamp(int(value), UTC)
+    except (OSError, ValueError):
+        return None
+
+    return None
+
+
+def _video_resolution(value: str | None) -> str | None:
+    value = str(value or "").strip()
+    if not value:
+        return None
+    if value == "2":
+        return "2K"
+    return value
+
+
+def _upload_target(value: str | None) -> str | None:
+    value = str(value or "").strip()
+    if value == "1":
+        return "Cloud"
+    if value:
+        return value
+    return None
+
+
+def _format_schedule(value: str | None) -> str | None:
+    value = str(value or "").strip()
+    if not value or "-" not in value:
+        return None
+
+    start, end = value.split("-", 1)
+    return f"{_format_hhmmss(start)} - {_format_hhmmss(end)}"
+
+
+def _format_hhmmss(value: str) -> str:
+    value = value.strip()
+    if len(value) == 6 and value.isdigit():
+        return f"{value[0:2]}:{value[2:4]}:{value[4:6]}"
+    return value
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _blank_to_none(value: Any) -> str | None:
+    value = str(value or "").strip()
+    return value or None
 
 
 class SuntekCloudClient:
@@ -561,13 +757,23 @@ class SuntekCloudClient:
         raise_for_ret_code(data)
         return data
 
+    async def async_list_cloud_files(
+        self, page: int = 1, page_size: int = 100
+    ) -> list[dict[str, Any]]:
+        """Return normalised cloud media file records."""
+        response = await self.async_query_files(page=page, page_size=page_size)
+        return cloud_files_from_response(response, self.server_addr)
+
     async def async_fetch_latest_image(self) -> bytes:
         """Fetch the latest cloud preview image when the file list exposes one."""
-        response = await self.async_query_files(page=1, page_size=100)
-        image_url = image_url_from_response(response, self.server_addr)
-        if not image_url:
+        files = await self.async_list_cloud_files(page=1, page_size=100)
+        image = next(
+            (item for item in files if item.get("media_type") == "image"),
+            None,
+        )
+        if image is None:
             raise SuntekApiError("No preview image URL found in the file list")
-        return await self.async_fetch_bytes(image_url)
+        return await self.async_fetch_bytes(str(image["download_url"]))
 
     def _apply_device_metadata(self, response: Mapping[str, Any]) -> None:
         data = response.get("data")
@@ -585,11 +791,13 @@ class SuntekCloudClient:
                 self.server_addr = next_server_addr
                 self._cloud_password = None
 
-    async def async_fetch_bytes(self, url: str) -> bytes:
-        """Fetch bytes for a still-image URL."""
+    async def async_fetch_bytes(self, url: str, timeout: int | None = None) -> bytes:
+        """Fetch bytes for a cloud media URL."""
         headers = {"User-Agent": "SuntekCam/2.0 HomeAssistant"}
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
-        async with self.session.get(url, headers=headers, timeout=timeout) as response:
+        client_timeout = aiohttp.ClientTimeout(total=timeout or self.timeout)
+        async with self.session.get(
+            url, headers=headers, timeout=client_timeout
+        ) as response:
             if response.status >= 400:
                 raise SuntekApiError(f"HTTP {response.status} while fetching {url}")
             return await response.read()

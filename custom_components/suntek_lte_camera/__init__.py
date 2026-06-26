@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 from typing import Any
 
@@ -15,26 +16,39 @@ from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_track_time_interval
 
-from .api import SuntekCloudClient
+from .api import SuntekApiError, SuntekCloudClient
 from .const import (
     ATTR_CONTENT,
     ATTR_ENTRY_ID,
+    ATTR_INCLUDE_IMAGES,
+    ATTR_INCLUDE_VIDEOS,
+    ATTR_LIMIT,
     CONF_CLOUD_DEVICE_ID,
     CONF_DEVICE_ID,
+    CONF_MEDIA_BACKUP_ENABLED,
+    CONF_MEDIA_BACKUP_INCLUDE_VIDEOS,
+    CONF_MEDIA_BACKUP_INTERVAL,
+    CONF_MEDIA_BACKUP_LIMIT,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_SERVER_ADDR,
+    DEFAULT_MEDIA_BACKUP_INTERVAL,
+    DEFAULT_MEDIA_BACKUP_LIMIT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_WAKE_COMMAND,
     DOMAIN,
     SERVICE_REFRESH,
+    SERVICE_SYNC_CLOUD_MEDIA,
     SERVICE_WAKEUP,
 )
 from .coordinator import SuntekDataUpdateCoordinator, SuntekRuntimeData
 from .frontend import SuntekFrontend
+from .media import async_sync_cloud_media
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +70,17 @@ WAKEUP_SCHEMA = vol.Schema(
 
 REFRESH_SCHEMA = vol.Schema({vol.Optional(ATTR_ENTRY_ID): cv.string})
 
+SYNC_CLOUD_MEDIA_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_LIMIT, default=DEFAULT_MEDIA_BACKUP_LIMIT): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=1000)
+        ),
+        vol.Optional(ATTR_INCLUDE_IMAGES, default=True): cv.boolean,
+        vol.Optional(ATTR_INCLUDE_VIDEOS, default=True): cv.boolean,
+    }
+)
+
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up services for Suntek LTE Camera."""
@@ -72,11 +97,32 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         for runtime in _iter_runtime_data(hass, call.data.get(ATTR_ENTRY_ID)):
             await runtime.coordinator.async_request_refresh()
 
+    async def handle_sync_cloud_media(call: ServiceCall) -> None:
+        for runtime in _iter_runtime_data(hass, call.data.get(ATTR_ENTRY_ID)):
+            try:
+                await async_sync_cloud_media(
+                    hass,
+                    runtime,
+                    limit=call.data[ATTR_LIMIT],
+                    include_images=call.data[ATTR_INCLUDE_IMAGES],
+                    include_videos=call.data[ATTR_INCLUDE_VIDEOS],
+                )
+            except SuntekApiError as err:
+                raise HomeAssistantError(
+                    f"Suntek cloud media sync failed: {err}"
+                ) from err
+
     hass.services.async_register(
         DOMAIN, SERVICE_WAKEUP, handle_wakeup, schema=WAKEUP_SCHEMA
     )
     hass.services.async_register(
         DOMAIN, SERVICE_REFRESH, handle_refresh, schema=REFRESH_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SYNC_CLOUD_MEDIA,
+        handle_sync_cloud_media,
+        schema=SYNC_CLOUD_MEDIA_SCHEMA,
     )
     return True
 
@@ -98,12 +144,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SuntekRuntimeData(
+        entry=entry,
         client=client,
         coordinator=coordinator,
     )
     await coordinator.async_refresh()
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    _async_schedule_media_backup(hass, hass.data[DOMAIN][entry.entry_id])
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -135,6 +183,48 @@ def _iter_runtime_data(
 
 def _entry_value(entry: ConfigEntry, key: str, default: Any = None) -> Any:
     return entry.options.get(key, entry.data.get(key, default))
+
+
+def _async_schedule_media_backup(
+    hass: HomeAssistant, runtime: SuntekRuntimeData
+) -> None:
+    """Schedule optional periodic cloud media backup."""
+    entry = runtime.entry
+    if not _entry_value(entry, CONF_MEDIA_BACKUP_ENABLED, False):
+        return
+
+    interval_minutes = max(
+        15,
+        int(
+            _entry_value(
+                entry, CONF_MEDIA_BACKUP_INTERVAL, DEFAULT_MEDIA_BACKUP_INTERVAL
+            )
+        ),
+    )
+
+    async def _async_run_backup(_now) -> None:
+        try:
+            await async_sync_cloud_media(
+                hass,
+                runtime,
+                limit=int(
+                    _entry_value(
+                        entry, CONF_MEDIA_BACKUP_LIMIT, DEFAULT_MEDIA_BACKUP_LIMIT
+                    )
+                ),
+                include_images=True,
+                include_videos=bool(
+                    _entry_value(entry, CONF_MEDIA_BACKUP_INCLUDE_VIDEOS, True)
+                ),
+            )
+        except SuntekApiError as err:
+            _LOGGER.warning("Scheduled Suntek cloud media backup failed: %s", err)
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass, _async_run_backup, timedelta(minutes=interval_minutes)
+        )
+    )
 
 
 def _async_schedule_frontend(hass: HomeAssistant) -> None:

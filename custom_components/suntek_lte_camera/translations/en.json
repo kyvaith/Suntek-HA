@@ -30,7 +30,11 @@
         "title": "Suntek LTE Camera options",
         "data": {
           "wake_cooldown": "Wake cooldown seconds",
-          "scan_interval": "Status scan interval seconds"
+          "scan_interval": "Status scan interval seconds",
+          "media_backup_enabled": "Enable scheduled cloud media backup",
+          "media_backup_interval": "Cloud media backup interval minutes",
+          "media_backup_limit": "Cloud media backup file limit",
+          "media_backup_include_videos": "Include videos in scheduled backup"
         }
       }
     }
@@ -44,16 +48,64 @@
     "button": {
       "wakeup": {
         "name": "Wake up"
+      },
+      "sync_cloud_media": {
+        "name": "Sync cloud media"
       }
     },
     "binary_sensor": {
+      "cloud_connection": {
+        "name": "Cloud connection"
+      },
       "online": {
         "name": "Online"
       }
     },
     "sensor": {
+      "signal": {
+        "name": "Signal"
+      },
+      "battery": {
+        "name": "Battery"
+      },
+      "sd_storage": {
+        "name": "SD storage"
+      },
+      "temperature": {
+        "name": "Temperature"
+      },
+      "last_communication": {
+        "name": "Last communication"
+      },
+      "position": {
+        "name": "Position"
+      },
+      "model": {
+        "name": "Model"
+      },
+      "firmware": {
+        "name": "Firmware"
+      },
+      "apn": {
+        "name": "APN"
+      },
+      "video_resolution": {
+        "name": "Video resolution"
+      },
+      "video_length": {
+        "name": "Video length"
+      },
+      "upload_target": {
+        "name": "Upload target"
+      },
+      "schedule": {
+        "name": "Schedule"
+      },
       "last_wakeup": {
         "name": "Last wake-up"
+      },
+      "last_media_sync": {
+        "name": "Last media sync"
       }
     }
   }

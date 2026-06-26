@@ -82,24 +82,30 @@ class SuntekCamera(Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return a still image for Home Assistant camera previews."""
+        await self._async_wakeup_for_preview()
+
         template = entry_value(self._entry, CONF_STILL_IMAGE_URL_TEMPLATE, "")
         if not template:
             return await self._async_latest_or_fallback_image()
 
         try:
             url = self._runtime.client.render_url_template(template)
-            return await self._runtime.client.async_fetch_bytes(url)
+            data = await self._runtime.client.async_fetch_bytes(url)
+            self._attr_content_type = _content_type(data)
+            return data
         except SuntekApiError as err:
             _LOGGER.warning("Suntek still image fetch failed: %s", err)
             return await self._async_latest_or_fallback_image()
 
     async def _async_latest_or_fallback_image(self) -> bytes | None:
-        await self._async_wakeup_for_preview()
         try:
-            return await self._runtime.client.async_fetch_latest_image()
+            data = await self._runtime.client.async_fetch_latest_image()
         except SuntekApiError as err:
             _LOGGER.debug("Suntek latest image fetch failed: %s", err)
-            return await self.hass.async_add_executor_job(_read_fallback_image)
+            data = await self.hass.async_add_executor_job(_read_fallback_image)
+
+        self._attr_content_type = _content_type(data)
+        return data
 
     async def _async_wakeup_for_preview(self) -> None:
         cooldown = int(
@@ -117,3 +123,13 @@ def _read_fallback_image() -> bytes | None:
     except OSError as err:
         _LOGGER.warning("Suntek fallback image is unavailable: %s", err)
         return None
+
+
+def _content_type(data: bytes | None) -> str:
+    if not data:
+        return "image/png"
+    if data.startswith(b"\xff\xd8"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG"):
+        return "image/png"
+    return "image/jpeg"
