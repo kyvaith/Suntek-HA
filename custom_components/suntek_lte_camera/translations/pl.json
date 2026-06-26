@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Suntek LTE Camera",
+        "description": "Dodaje obsługę API SuntekCam do statusu i wybudzania. Obraz live wymaga bezpośredniego URL RTSP/HLS/MJPEG albo lokalnego bridge'a P2P.",
+        "data": {
+          "device_id": "IMEI / ID urządzenia",
+          "name": "Nazwa",
+          "password": "Hasło cloud",
+          "server_addr": "Bazowy URL serwera cloud",
+          "stream_url_template": "Szablon URL streamu",
+          "still_image_url_template": "Szablon URL obrazu statycznego",
+          "wake_before_stream": "Wybudzaj kamerę przed streamem",
+          "wake_cooldown": "Cooldown wybudzania w sekundach",
+          "scan_interval": "Interwał sprawdzania statusu w sekundach"
+        }
+      }
+    },
+    "error": {
+      "required": "To pole jest wymagane"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje Suntek LTE Camera",
+        "data": {
+          "password": "Hasło cloud",
+          "server_addr": "Bazowy URL serwera cloud",
+          "stream_url_template": "Szablon URL streamu",
+          "still_image_url_template": "Szablon URL obrazu statycznego",
+          "wake_before_stream": "Wybudzaj kamerę przed streamem",
+          "wake_cooldown": "Cooldown wybudzania w sekundach",
+          "scan_interval": "Interwał sprawdzania statusu w sekundach"
+        }
+      }
+    }
+  },
+  "entity": {
+    "camera": {
+      "camera": {
+        "name": "Kamera"
+      }
+    },
+    "button": {
+      "wakeup": {
+        "name": "Wybudź"
+      }
+    },
+    "binary_sensor": {
+      "online": {
+        "name": "Online"
+      }
+    }
+  }
+}
+

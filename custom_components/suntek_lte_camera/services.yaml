@@ -1,0 +1,28 @@
+wakeup:
+  name: Wake up
+  description: Send the SuntekCam cloud wakeup command to one or all configured cameras.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional Home Assistant config entry ID. If omitted, all Suntek cameras are targeted.
+      selector:
+        text:
+    content:
+      name: Command content
+      description: Numeric command content. The APK uses 999 for LTE wakeup.
+      default: 999
+      selector:
+        number:
+          min: 0
+          mode: box
+
+refresh:
+  name: Refresh
+  description: Refresh the Suntek online status sensor.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional Home Assistant config entry ID. If omitted, all Suntek cameras are refreshed.
+      selector:
+        text:
+

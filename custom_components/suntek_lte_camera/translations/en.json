@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Suntek LTE Camera",
+        "description": "Add the SuntekCam cloud wakeup/status API. Live video needs a direct RTSP/HLS/MJPEG URL or a local P2P bridge URL.",
+        "data": {
+          "device_id": "IMEI / device ID",
+          "name": "Name",
+          "password": "Cloud password",
+          "server_addr": "Cloud server base URL",
+          "stream_url_template": "Stream URL template",
+          "still_image_url_template": "Still image URL template",
+          "wake_before_stream": "Wake camera before stream",
+          "wake_cooldown": "Wake cooldown seconds",
+          "scan_interval": "Status scan interval seconds"
+        }
+      }
+    },
+    "error": {
+      "required": "This field is required"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Suntek LTE Camera options",
+        "data": {
+          "password": "Cloud password",
+          "server_addr": "Cloud server base URL",
+          "stream_url_template": "Stream URL template",
+          "still_image_url_template": "Still image URL template",
+          "wake_before_stream": "Wake camera before stream",
+          "wake_cooldown": "Wake cooldown seconds",
+          "scan_interval": "Status scan interval seconds"
+        }
+      }
+    }
+  },
+  "entity": {
+    "camera": {
+      "camera": {
+        "name": "Camera"
+      }
+    },
+    "button": {
+      "wakeup": {
+        "name": "Wake up"
+      }
+    },
+    "binary_sensor": {
+      "online": {
+        "name": "Online"
+      }
+    }
+  }
+}
+
