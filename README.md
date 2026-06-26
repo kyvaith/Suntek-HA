@@ -72,10 +72,12 @@ After setup, Home Assistant creates the camera entity, online sensor, and wake-u
 
 After restarting Home Assistant, add the `Suntek Camera` card from the dashboard card picker.
 
+The integration registers the card resource automatically when Home Assistant dashboards use storage mode.
+
 If the card does not appear in the picker, add this JavaScript module resource in Home Assistant dashboards:
 
 ```text
-/suntek_lte_camera/frontend/suntek-camera-card.js?v=0.3.0
+/suntek_lte_camera/frontend/suntek-camera-card.js?v=0.3.2
 ```
 
 Manual YAML example:

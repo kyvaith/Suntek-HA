@@ -9,7 +9,6 @@ from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import SuntekApiError
 from .const import (
@@ -36,7 +35,7 @@ async def async_setup_entry(
     async_add_entities([SuntekCamera(runtime, entry)])
 
 
-class SuntekCamera(CoordinatorEntity, Camera):
+class SuntekCamera(Camera):
     """Suntek camera entity for the Home Assistant camera dashboard tile."""
 
     _attr_has_entity_name = True
@@ -44,7 +43,7 @@ class SuntekCamera(CoordinatorEntity, Camera):
     _attr_content_type = "image/png"
 
     def __init__(self, runtime: SuntekRuntimeData, entry: ConfigEntry) -> None:
-        super().__init__(runtime.coordinator)
+        super().__init__()
         self._runtime = runtime
         self._entry = entry
         self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_camera"

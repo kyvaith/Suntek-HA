@@ -316,7 +316,7 @@ customElements.define("suntek-camera-card", SuntekCameraCard);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "custom:suntek-camera-card",
+  type: "suntek-camera-card",
   name: "Suntek Camera",
   description: "Trail camera preview with online status and wake-up action.",
   preview: true,
