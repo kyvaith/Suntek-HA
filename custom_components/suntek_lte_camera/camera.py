@@ -94,11 +94,21 @@ class SuntekCamera(Camera):
             return await self._async_latest_or_fallback_image()
 
     async def _async_latest_or_fallback_image(self) -> bytes | None:
+        await self._async_wakeup_for_preview()
         try:
             return await self._runtime.client.async_fetch_latest_image()
         except SuntekApiError as err:
             _LOGGER.debug("Suntek latest image fetch failed: %s", err)
             return await self.hass.async_add_executor_job(_read_fallback_image)
+
+    async def _async_wakeup_for_preview(self) -> None:
+        cooldown = int(
+            entry_value(self._entry, CONF_WAKE_COOLDOWN, DEFAULT_WAKE_COOLDOWN)
+        )
+        try:
+            await self._runtime.client.async_wakeup(cooldown=cooldown)
+        except SuntekApiError as err:
+            _LOGGER.debug("Suntek wakeup before preview failed: %s", err)
 
 
 def _read_fallback_image() -> bytes | None:

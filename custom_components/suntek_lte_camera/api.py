@@ -32,6 +32,7 @@ _DEVICE_ID_KEYS = (
     "did",
     "sn",
 )
+_DEVICE_CLOUD_ID_KEYS = ("deviceid", "device_id", "deviceId")
 _DEVICE_NAME_KEYS = (
     "devicename",
     "deviceName",
@@ -178,7 +179,11 @@ def devices_from_response(
     seen: set[str] = set()
 
     for item in _iter_device_mappings(value):
-        device_id = _first_mapping_value(item, _DEVICE_ID_KEYS)
+        imei = _first_mapping_value(item, ("imei",))
+        cloud_device_id = _first_mapping_value(item, _DEVICE_CLOUD_ID_KEYS)
+        device_id = (
+            imei or cloud_device_id or _first_mapping_value(item, _DEVICE_ID_KEYS)
+        )
         if not device_id and _has_device_hint(item):
             device_id = _first_mapping_value(item, ("id",))
         if not device_id or device_id in seen:
@@ -192,6 +197,7 @@ def devices_from_response(
         devices.append(
             {
                 "device_id": device_id,
+                "cloud_device_id": cloud_device_id or device_id,
                 "name": name,
                 "server_addr": server_addr,
             }
@@ -204,6 +210,7 @@ def devices_from_response(
     return [
         {
             "device_id": fallback_id,
+            "cloud_device_id": fallback_id,
             "name": fallback_id,
             "server_addr": normalise_server_addr(default_server_addr),
         }
@@ -212,6 +219,11 @@ def devices_from_response(
 
 def image_url_from_response(value: Any, base_url: str) -> str:
     """Return the first likely preview image URL from a file-list response."""
+    for item in _iter_file_mappings(value):
+        image_url = _image_url_from_file_mapping(item, base_url)
+        if image_url:
+            return image_url
+
     for item in _iter_image_url_candidates(value):
         url = _normalise_image_url(item, base_url)
         if url:
@@ -315,6 +327,33 @@ def _iter_image_url_candidates(value: Any, key_hint: str = ""):
         yield value
 
 
+def _iter_file_mappings(value: Any):
+    if isinstance(value, Mapping):
+        if any(str(key).lower() in {"fileurl", "reducefileurl"} for key in value):
+            yield value
+
+        for item in value.values():
+            if isinstance(item, (Mapping, list)):
+                yield from _iter_file_mappings(item)
+
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_file_mappings(item)
+
+
+def _image_url_from_file_mapping(mapping: Mapping[str, Any], base_url: str) -> str:
+    candidates = (
+        _first_mapping_value(mapping, ("reducefileurl", "thumbnail", "thumburl")),
+        _first_mapping_value(mapping, ("fileurl", "url")),
+    )
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if _looks_like_image_url(candidate, "fileurl"):
+            return _normalise_image_url(candidate, base_url)
+    return ""
+
+
 def _looks_like_image_url(value: str, key_hint: str) -> bool:
     value_l = value.strip().lower().replace("\\", "/")
     if not value_l.startswith(("http://", "https://", "/", "//")):
@@ -348,10 +387,12 @@ class SuntekCloudClient:
         device_id: str,
         server_addr: str = DEFAULT_SERVER_ADDR,
         password: str = "",
+        cloud_device_id: str = "",
         timeout: int = 15,
     ) -> None:
         self.session = session
         self.device_id = device_id.strip()
+        self.cloud_device_id = cloud_device_id.strip()
         self.server_addr = normalise_server_addr(server_addr or DEFAULT_SERVER_ADDR)
         self.password = password or ""
         self.timeout = timeout
@@ -485,6 +526,7 @@ class SuntekCloudClient:
         raise_for_ret_code(data)
         if not data.get("data"):
             raise SuntekApiError("Device was not found")
+        self._apply_device_metadata(data)
         return data
 
     async def async_discover_devices(self) -> list[dict[str, str]]:
@@ -492,14 +534,23 @@ class SuntekCloudClient:
         response = await self.async_query_device()
         return devices_from_response(response, self.device_id, self.server_addr)
 
+    async def async_cloud_device_id(self) -> str:
+        """Return the cloud file-list device id, usually VIST-..."""
+        if self.cloud_device_id:
+            return self.cloud_device_id
+
+        await self.async_query_device()
+        return self.cloud_device_id or self.device_id
+
     async def async_query_files(
         self, page: int = 1, page_size: int = 20
     ) -> dict[str, Any]:
         """Query cloud files for the configured device."""
+        cloud_device_id = await self.async_cloud_device_id()
         url = legacy_signed_url(
             {
                 "curPage": page,
-                "deviceid": self.device_id,
+                "deviceid": cloud_device_id,
                 "pageSize": page_size,
                 "password": await self.async_effective_password(),
                 "timestamp": int(time.time()),
@@ -512,11 +563,27 @@ class SuntekCloudClient:
 
     async def async_fetch_latest_image(self) -> bytes:
         """Fetch the latest cloud preview image when the file list exposes one."""
-        response = await self.async_query_files(page=1, page_size=10)
+        response = await self.async_query_files(page=1, page_size=100)
         image_url = image_url_from_response(response, self.server_addr)
         if not image_url:
             raise SuntekApiError("No preview image URL found in the file list")
         return await self.async_fetch_bytes(image_url)
+
+    def _apply_device_metadata(self, response: Mapping[str, Any]) -> None:
+        data = response.get("data")
+        if not isinstance(data, Mapping):
+            return
+
+        cloud_device_id = _first_mapping_value(data, _DEVICE_CLOUD_ID_KEYS)
+        if cloud_device_id:
+            self.cloud_device_id = cloud_device_id
+
+        server_addr = _first_mapping_value(data, _DEVICE_SERVER_KEYS)
+        if server_addr:
+            next_server_addr = normalise_server_addr(server_addr)
+            if next_server_addr != self.server_addr:
+                self.server_addr = next_server_addr
+                self._cloud_password = None
 
     async def async_fetch_bytes(self, url: str) -> bytes:
         """Fetch bytes for a still-image URL."""

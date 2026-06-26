@@ -22,6 +22,7 @@ from .api import SuntekCloudClient
 from .const import (
     ATTR_CONTENT,
     ATTR_ENTRY_ID,
+    CONF_CLOUD_DEVICE_ID,
     CONF_DEVICE_ID,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
@@ -88,6 +89,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_id=entry.data[CONF_DEVICE_ID],
         server_addr=_entry_value(entry, CONF_SERVER_ADDR),
         password=_entry_value(entry, CONF_PASSWORD, ""),
+        cloud_device_id=_entry_value(entry, CONF_CLOUD_DEVICE_ID, ""),
     )
     coordinator = SuntekDataUpdateCoordinator(
         hass,

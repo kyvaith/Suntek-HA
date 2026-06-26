@@ -12,6 +12,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import SuntekApiError, SuntekCloudClient
 from .const import (
+    CONF_CLOUD_DEVICE_ID,
     CONF_DEVICE_ID,
     CONF_LOGIN,
     CONF_NAME,
@@ -90,6 +91,7 @@ class SuntekConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_LOGIN: self._login,
                     CONF_PASSWORD: self._password,
                     CONF_DEVICE_ID: device_id,
+                    CONF_CLOUD_DEVICE_ID: device.get(CONF_CLOUD_DEVICE_ID, device_id),
                     CONF_NAME: title,
                     CONF_SERVER_ADDR: device.get(CONF_SERVER_ADDR, DEFAULT_SERVER_ADDR),
                     CONF_WAKE_COOLDOWN: DEFAULT_WAKE_COOLDOWN,
@@ -190,9 +192,16 @@ def _normalise_devices(
 
         seen.add(device_id)
         name = str(device.get(CONF_NAME) or device_id).strip()
+        cloud_device_id = str(
+            device.get(CONF_CLOUD_DEVICE_ID)
+            or device.get("cloud_id")
+            or device.get("deviceid")
+            or device_id
+        ).strip()
         normalised.append(
             {
                 CONF_DEVICE_ID: device_id,
+                CONF_CLOUD_DEVICE_ID: cloud_device_id,
                 CONF_NAME: name,
                 CONF_SERVER_ADDR: str(
                     device.get(CONF_SERVER_ADDR) or DEFAULT_SERVER_ADDR
@@ -207,6 +216,7 @@ def _normalise_devices(
     return [
         {
             CONF_DEVICE_ID: fallback_id,
+            CONF_CLOUD_DEVICE_ID: fallback_id,
             CONF_NAME: fallback_id,
             CONF_SERVER_ADDR: DEFAULT_SERVER_ADDR,
         }

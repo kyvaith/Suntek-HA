@@ -9,6 +9,7 @@ DEFAULT_WAKE_COOLDOWN = 60
 DEFAULT_SCAN_INTERVAL = 60
 
 CONF_DEVICE_ID = "device_id"
+CONF_CLOUD_DEVICE_ID = "cloud_device_id"
 CONF_LOGIN = "login"
 CONF_NAME = "name"
 CONF_PASSWORD = "password"

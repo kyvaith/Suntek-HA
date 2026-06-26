@@ -17,6 +17,7 @@ A Home Assistant custom integration for Suntek LTE trail cameras used for outdoo
 
 - Adds a standard Home Assistant camera entity with a dashboard preview tile.
 - Adds a dedicated `Suntek Camera` dashboard card.
+- Wakes the LTE camera automatically when Home Assistant requests the camera preview.
 - Lets you add the camera from the Home Assistant UI with login, password, and camera selection.
 - Handles the Suntek cloud password hash used by the mobile app.
 - Validates the camera against the Suntek cloud during setup.
@@ -67,6 +68,8 @@ The setup flow asks for:
 Enter the plain PIN/password from the SuntekCam app or camera instructions. The integration asks the Suntek cloud for the matching password hash and falls back to MD5 hashing when needed.
 
 After setup, Home Assistant creates the camera entity, online sensor, and wake-up button for the selected Suntek LTE trail camera.
+
+The camera preview uses the newest JPEG image available from the Suntek cloud file list. Opening the preview also sends the wake-up command automatically, with a cooldown to avoid repeated wake-up requests.
 
 ## Dashboard Card
 
