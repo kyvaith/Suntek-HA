@@ -7,9 +7,10 @@ from datetime import UTC, datetime
 import hashlib
 import json
 import logging
+import re
 import time
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 import aiohttp
 
@@ -20,6 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 SERVER_COMMAND_SECRET = "8ac10106160c56f023a8063d5c"
 LEGACY_HTTP_SECRET = "dfs4132541df512sfd0"
 LEGACY_HTTPS_SECRET = "xme4x84lzd3dsfsfd0"
+_MD5_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
 
 _DEVICE_ID_KEYS = (
     "imei",
@@ -45,6 +47,7 @@ _DEVICE_SERVER_KEYS = (
     "server_addr",
     "server",
     "serverUrl",
+    "userdata2",
 )
 _IMAGE_URL_HINTS = (
     "image",
@@ -76,6 +79,25 @@ def _encode_param(value: str) -> str:
 
 def _strip_trailing_slash(value: str) -> str:
     return value.strip().rstrip("/")
+
+
+def normalise_server_addr(value: str) -> str:
+    """Return a full 4gcardv server URL from APK server hints."""
+    value = _strip_trailing_slash(value or DEFAULT_SERVER_ADDR)
+    if not value:
+        return DEFAULT_SERVER_ADDR
+
+    if not value.startswith(("http://", "https://")):
+        value = f"https://{value}"
+
+    parsed = urlparse(value)
+    if parsed.netloc and "." not in parsed.netloc:
+        value = parsed._replace(netloc=f"{parsed.netloc}.car-dv.com").geturl()
+
+    if not value.endswith("/4gcardv"):
+        value = f"{value}/4gcardv"
+
+    return value
 
 
 def av_server_addr(server_addr: str) -> str:
@@ -164,7 +186,7 @@ def devices_from_response(
 
         seen.add(device_id)
         name = _device_display_name(item, device_id)
-        server_addr = (
+        server_addr = normalise_server_addr(
             _first_mapping_value(item, _DEVICE_SERVER_KEYS) or default_server_addr
         )
         devices.append(
@@ -183,7 +205,7 @@ def devices_from_response(
         {
             "device_id": fallback_id,
             "name": fallback_id,
-            "server_addr": default_server_addr,
+            "server_addr": normalise_server_addr(default_server_addr),
         }
     ]
 
@@ -314,7 +336,7 @@ def _normalise_image_url(value: str, base_url: str) -> str:
         return f"https:{value}"
     if value.startswith(("http://", "https://")):
         return value
-    return urljoin(f"{_strip_trailing_slash(base_url)}/", value)
+    return urljoin(f"{normalise_server_addr(base_url)}/", value)
 
 
 class SuntekCloudClient:
@@ -330,10 +352,11 @@ class SuntekCloudClient:
     ) -> None:
         self.session = session
         self.device_id = device_id.strip()
-        self.server_addr = _strip_trailing_slash(server_addr or DEFAULT_SERVER_ADDR)
+        self.server_addr = normalise_server_addr(server_addr or DEFAULT_SERVER_ADDR)
         self.password = password or ""
         self.timeout = timeout
         self._last_wakeup = 0.0
+        self._cloud_password: str | None = None
         self.last_wakeup: dict[str, Any] = {"state": "never"}
 
     @property
@@ -423,12 +446,37 @@ class SuntekCloudClient:
         raise_for_ret_code(data)
         return data
 
+    async def async_effective_password(self) -> str:
+        """Return the cloud password hash used by the Android app."""
+        if self._cloud_password:
+            return self._cloud_password
+
+        try:
+            response = await self.async_query_cloud_password()
+        except SuntekApiError as err:
+            _LOGGER.debug("Suntek queryPassword failed, using local hash: %s", err)
+        else:
+            cloud_password = str(response.get("data") or "").strip()
+            if cloud_password:
+                self._cloud_password = cloud_password
+                return cloud_password
+
+        password = self.password.strip()
+        if not password:
+            return ""
+        if _MD5_RE.match(password):
+            return password.lower()
+        return _md5(password)
+
     async def async_query_device(self, password: str | None = None) -> dict[str, Any]:
         """Query device metadata from the 4gcardv cloud."""
+        effective_password = (
+            password if password is not None else await self.async_effective_password()
+        )
         url = legacy_signed_url(
             {
                 "imei": self.device_id,
-                "password": password if password is not None else self.password,
+                "password": effective_password,
                 "timestamp": int(time.time()),
             },
             f"{self.server_addr}/msgfileApi/api/queryDevice",
@@ -441,7 +489,7 @@ class SuntekCloudClient:
 
     async def async_discover_devices(self) -> list[dict[str, str]]:
         """Return camera choices for the config flow."""
-        response = await self.async_query_device(self.password)
+        response = await self.async_query_device()
         return devices_from_response(response, self.device_id, self.server_addr)
 
     async def async_query_files(
@@ -453,7 +501,7 @@ class SuntekCloudClient:
                 "curPage": page,
                 "deviceid": self.device_id,
                 "pageSize": page_size,
-                "password": self.password,
+                "password": await self.async_effective_password(),
                 "timestamp": int(time.time()),
             },
             f"{self.server_addr}/msgfileApi/api/queryFiles",

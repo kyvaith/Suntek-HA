@@ -3,10 +3,10 @@
     "step": {
       "user": {
         "title": "Suntek LTE Camera",
-        "description": "Enter the same login and password used for your SuntekCam trail camera. The next step lets you pick the camera.",
+        "description": "Enter the camera IMEI and the plain PIN/password from SuntekCam. The integration handles the cloud password hash automatically.",
         "data": {
           "login": "Login / IMEI",
-          "password": "Password"
+          "password": "PIN / password"
         }
       },
       "select_device": {
