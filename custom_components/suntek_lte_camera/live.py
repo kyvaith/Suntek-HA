@@ -59,6 +59,10 @@ class SuntekP2PLiveError(Exception):
     """Raised when a live P2P stream cannot be opened."""
 
 
+class SuntekP2PLiveStopped(Exception):
+    """Raised when the HTTP client intentionally closes the live stream."""
+
+
 class SuntekP2PLiveClient:
     """Blocking P2P live client.
 
@@ -72,8 +76,8 @@ class SuntekP2PLiveClient:
         device_api: str | None,
         password_hash: str,
         *,
-        connect_timeout: float = 240.0,
-        stream_timeout: float = 180.0,
+        connect_timeout: float = 360.0,
+        stream_timeout: float = 240.0,
     ) -> None:
         self.did = did
         self.password_hash = password_hash
@@ -107,7 +111,12 @@ class SuntekP2PLiveClient:
             yield from self._iter_jpeg_frames(sock, peer, stop_event)
 
     def _send(self, sock: socket.socket, packet: bytes, address: tuple[str, int]) -> None:
-        sock.sendto(p2p_encrypt(self.profile.key, packet), address)
+        try:
+            sock.sendto(p2p_encrypt(self.profile.key, packet), address)
+        except OSError as err:
+            if self._socket is None:
+                raise SuntekP2PLiveStopped from err
+            raise
 
     def _connect(
         self, sock: socket.socket, stop_event: threading.Event
@@ -152,6 +161,8 @@ class SuntekP2PLiveClient:
             except TimeoutError:
                 continue
             except OSError as err:
+                if stop_event.is_set() or self._socket is None:
+                    raise SuntekP2PLiveStopped from err
                 raise SuntekP2PLiveError(f"P2P socket closed: {err}") from err
 
             try:
@@ -228,7 +239,14 @@ class SuntekP2PLiveClient:
             if packet.packet_type == PACKET_RELAY_READY:
                 return address
 
-        raise SuntekP2PLiveError("Timed out waiting for Suntek P2P live session")
+        if stop_event.is_set():
+            raise SuntekP2PLiveStopped
+
+        raise SuntekP2PLiveError(
+            "Timed out waiting for Suntek P2P live session "
+            f"(hello={len(hello_servers)}, peers={len(peer_candidates)}, "
+            f"relays={len(relay_candidates)})"
+        )
 
     def _iter_jpeg_frames(
         self,

@@ -71,7 +71,7 @@ Enter the plain PIN/password from the SuntekCam app or camera instructions. The 
 
 After setup, Home Assistant creates the camera entity, cloud connection sensor, camera status sensors, wake-up button, and cloud media sync button for the selected Suntek LTE trail camera.
 
-The camera preview opens the native Suntek P2P live session and sends the wake-up command automatically. LTE wake-up can take from tens of seconds to a few minutes. If live video is not ready yet, the entity still falls back to the newest JPEG image available from the Suntek cloud file list.
+The camera preview opens the native Suntek P2P live session and sends the wake-up command automatically. LTE wake-up can take from tens of seconds to a few minutes. While the live P2P session is connecting, the MJPEG endpoint keeps the stream open with the latest preview frame.
 
 The cloud connection binary sensor only means that the Suntek command endpoint responded. The real camera information is exposed through the camera status sensors, based on the last status payload returned by the Suntek cloud.
 
@@ -105,7 +105,7 @@ The integration registers the card resource automatically when Home Assistant da
 If the card does not appear in the picker, add this JavaScript module resource in Home Assistant dashboards:
 
 ```text
-/suntek_lte_camera/frontend/suntek-camera-card.js?v=0.4.1
+/suntek_lte_camera/frontend/suntek-camera-card.js?v=0.4.2
 ```
 
 Manual YAML example:
