@@ -14,7 +14,13 @@ from urllib.parse import quote, urljoin, urlparse
 
 import aiohttp
 
-from .const import DEFAULT_SERVER_ADDR, DEFAULT_WAKE_COMMAND
+from .const import (
+    CONF_CLOUD_DEVICE_ID,
+    CONF_P2P_API,
+    CONF_P2P_DID,
+    DEFAULT_SERVER_ADDR,
+    DEFAULT_WAKE_COMMAND,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +39,7 @@ _DEVICE_ID_KEYS = (
     "sn",
 )
 _DEVICE_CLOUD_ID_KEYS = ("deviceid", "device_id", "deviceId")
+_DEVICE_P2P_API_KEYS = ("deviceapi", "deviceApi", "p2papi", "p2pApi")
 _DEVICE_NAME_KEYS = (
     "devicename",
     "deviceName",
@@ -195,10 +202,13 @@ def devices_from_response(
         server_addr = normalise_server_addr(
             _first_mapping_value(item, _DEVICE_SERVER_KEYS) or default_server_addr
         )
+        p2p_api = _first_mapping_value(item, _DEVICE_P2P_API_KEYS)
         devices.append(
             {
                 "device_id": device_id,
-                "cloud_device_id": cloud_device_id or device_id,
+                CONF_CLOUD_DEVICE_ID: cloud_device_id or device_id,
+                CONF_P2P_DID: cloud_device_id or device_id,
+                CONF_P2P_API: p2p_api,
                 "name": name,
                 "server_addr": server_addr,
             }
@@ -211,7 +221,9 @@ def devices_from_response(
     return [
         {
             "device_id": fallback_id,
-            "cloud_device_id": fallback_id,
+            CONF_CLOUD_DEVICE_ID: fallback_id,
+            CONF_P2P_DID: fallback_id,
+            CONF_P2P_API: "",
             "name": fallback_id,
             "server_addr": normalise_server_addr(default_server_addr),
         }
@@ -273,9 +285,12 @@ def device_status_from_response(value: Any) -> dict[str, Any]:
     status["latitude"] = _float_or_none(config.get("47"))
     status["longitude"] = _float_or_none(config.get("48"))
     status["position_valid"] = _truthy(config.get("49"))
-    status["video_resolution"] = _video_resolution(config.get("21"))
+    status["capture_mode"] = _capture_mode(config.get("21"))
+    status["video_resolution"] = _video_resolution(config.get("62") or config.get("54"))
     status["video_length"] = _int_or_none(config.get("26"))
-    status["upload_target"] = _upload_target(config.get("32"))
+    status["date_format"] = _date_format(config.get("31"))
+    status["temperature_unit"] = _temperature_unit(config.get("32"))
+    status["upload_target"] = _upload_target(config.get("66"))
     status["schedule"] = _format_schedule(config.get("33"))
     return status
 
@@ -523,20 +538,51 @@ def _parse_timestamp(value: str | None) -> datetime | None:
 
 def _video_resolution(value: str | None) -> str | None:
     value = str(value or "").strip()
-    if not value:
-        return None
-    if value == "2":
-        return "2K"
-    return value
+    return {
+        "0": "4K",
+        "1": "2K",
+        "2": "1080P",
+        "3": "720P",
+        "4": "VGA",
+    }.get(value, value or None)
 
 
 def _upload_target(value: str | None) -> str | None:
     value = str(value or "").strip()
-    if value == "1":
-        return "Cloud"
-    if value:
-        return value
-    return None
+    return {
+        "0": "Cloud",
+        "1": "Mail",
+        "2": "Cloud + Mail",
+        "3": "FTP",
+        "4": "Cloud + FTP",
+    }.get(value, value or None)
+
+
+def _capture_mode(value: str | None) -> str | None:
+    value = str(value or "").strip()
+    return {
+        "0": "Photo",
+        "1": "Video",
+        "2": "Photo + Video",
+        "3": "Timelapse",
+    }.get(value, value or None)
+
+
+def _date_format(value: str | None) -> str | None:
+    value = str(value or "").strip()
+    return {
+        "0": "YMD",
+        "1": "DMY",
+        "2": "MDY",
+    }.get(value, value or None)
+
+
+def _temperature_unit(value: str | None) -> str | None:
+    value = str(value or "").strip()
+    return {
+        "0": "F",
+        "1": "C",
+    }.get(value, value or None)
 
 
 def _format_schedule(value: str | None) -> str | None:
@@ -584,11 +630,15 @@ class SuntekCloudClient:
         server_addr: str = DEFAULT_SERVER_ADDR,
         password: str = "",
         cloud_device_id: str = "",
+        p2p_did: str = "",
+        p2p_api: str = "",
         timeout: int = 15,
     ) -> None:
         self.session = session
         self.device_id = device_id.strip()
         self.cloud_device_id = cloud_device_id.strip()
+        self.p2p_did = p2p_did.strip() or self.cloud_device_id
+        self.p2p_api = p2p_api.strip()
         self.server_addr = normalise_server_addr(server_addr or DEFAULT_SERVER_ADDR)
         self.password = password or ""
         self.timeout = timeout
@@ -610,6 +660,9 @@ class SuntekCloudClient:
                 password=self.password,
                 server_addr=self.server_addr,
                 av_server_addr=self.av_server_addr,
+                cloud_device_id=self.cloud_device_id,
+                p2p_did=self.p2p_did,
+                p2p_api=self.p2p_api,
             )
         except Exception as err:  # noqa: BLE001
             raise SuntekApiError(f"Invalid Suntek URL template: {err}") from err
@@ -783,6 +836,11 @@ class SuntekCloudClient:
         cloud_device_id = _first_mapping_value(data, _DEVICE_CLOUD_ID_KEYS)
         if cloud_device_id:
             self.cloud_device_id = cloud_device_id
+            self.p2p_did = cloud_device_id
+
+        p2p_api = _first_mapping_value(data, _DEVICE_P2P_API_KEYS)
+        if p2p_api:
+            self.p2p_api = p2p_api
 
         server_addr = _first_mapping_value(data, _DEVICE_SERVER_KEYS)
         if server_addr:

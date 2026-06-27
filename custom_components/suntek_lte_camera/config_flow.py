@@ -21,6 +21,8 @@ from .const import (
     CONF_MEDIA_BACKUP_LIMIT,
     CONF_NAME,
     CONF_PASSWORD,
+    CONF_P2P_API,
+    CONF_P2P_DID,
     CONF_SCAN_INTERVAL,
     CONF_SERVER_ADDR,
     CONF_WAKE_COOLDOWN,
@@ -98,6 +100,8 @@ class SuntekConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_PASSWORD: self._password,
                     CONF_DEVICE_ID: device_id,
                     CONF_CLOUD_DEVICE_ID: device.get(CONF_CLOUD_DEVICE_ID, device_id),
+                    CONF_P2P_DID: device.get(CONF_P2P_DID, device_id),
+                    CONF_P2P_API: device.get(CONF_P2P_API, ""),
                     CONF_NAME: title,
                     CONF_SERVER_ADDR: device.get(CONF_SERVER_ADDR, DEFAULT_SERVER_ADDR),
                     CONF_WAKE_COOLDOWN: DEFAULT_WAKE_COOLDOWN,
@@ -222,10 +226,18 @@ def _normalise_devices(
             or device.get("deviceid")
             or device_id
         ).strip()
+        p2p_did = str(
+            device.get(CONF_P2P_DID)
+            or device.get(CONF_CLOUD_DEVICE_ID)
+            or device.get("deviceid")
+            or cloud_device_id
+        ).strip()
         normalised.append(
             {
                 CONF_DEVICE_ID: device_id,
                 CONF_CLOUD_DEVICE_ID: cloud_device_id,
+                CONF_P2P_DID: p2p_did,
+                CONF_P2P_API: str(device.get(CONF_P2P_API) or "").strip(),
                 CONF_NAME: name,
                 CONF_SERVER_ADDR: str(
                     device.get(CONF_SERVER_ADDR) or DEFAULT_SERVER_ADDR
@@ -241,6 +253,8 @@ def _normalise_devices(
         {
             CONF_DEVICE_ID: fallback_id,
             CONF_CLOUD_DEVICE_ID: fallback_id,
+            CONF_P2P_DID: fallback_id,
+            CONF_P2P_API: "",
             CONF_NAME: fallback_id,
             CONF_SERVER_ADDR: DEFAULT_SERVER_ADDR,
         }

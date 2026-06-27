@@ -180,7 +180,7 @@ class SuntekCameraCard extends HTMLElement {
     const lastSync = this._entityState("last_media_sync_entity");
     const cloudText = cloud ? cloud.state : "unknown";
     const cloudClass = cloudText === "on" ? "online" : "offline";
-    const imageUrl = this._cameraImageUrl(camera);
+    const streamUrl = this._cameraStreamUrl(camera);
     const title =
       this._config.name ||
       camera?.attributes?.friendly_name ||
@@ -191,8 +191,8 @@ class SuntekCameraCard extends HTMLElement {
       <ha-card>
         <div class="preview">
           ${
-            imageUrl
-              ? `<img src="${imageUrl}" alt="${this._escape(title)}">`
+            streamUrl
+              ? `<img src="${streamUrl}" alt="${this._escape(title)}">`
               : `<div class="empty">Camera preview unavailable</div>`
           }
           <div class="shade"></div>
@@ -461,18 +461,17 @@ class SuntekCameraCard extends HTMLElement {
     return entityId ? this._hass.states[entityId] : undefined;
   }
 
-  _cameraImageUrl(camera) {
+  _cameraStreamUrl(camera) {
     if (!camera) {
       return "";
     }
 
     const token = camera.attributes?.access_token;
     const entityId = encodeURIComponent(this._config.entity);
-    const cacheBust = Date.now();
     if (token) {
-      return `/api/camera_proxy/${entityId}?token=${token}&t=${cacheBust}`;
+      return `/api/camera_proxy_stream/${entityId}?token=${token}`;
     }
-    return `/api/camera_proxy/${entityId}?t=${cacheBust}`;
+    return `/api/camera_proxy_stream/${entityId}`;
   }
 
   _escape(value) {

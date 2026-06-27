@@ -15,7 +15,7 @@ A Home Assistant custom integration for Suntek LTE trail cameras used for outdoo
 
 ## Features
 
-- Adds a standard Home Assistant camera entity with a dashboard preview tile.
+- Adds a standard Home Assistant camera entity with a native P2P live preview.
 - Adds a dedicated `Suntek Camera` dashboard card.
 - Wakes the LTE camera automatically whenever Home Assistant requests the camera preview.
 - Lets you add the camera from the Home Assistant UI with login, password, and camera selection.
@@ -71,7 +71,7 @@ Enter the plain PIN/password from the SuntekCam app or camera instructions. The 
 
 After setup, Home Assistant creates the camera entity, cloud connection sensor, camera status sensors, wake-up button, and cloud media sync button for the selected Suntek LTE trail camera.
 
-The camera preview uses the newest JPEG image available from the Suntek cloud file list. Opening the preview also sends the wake-up command automatically, with a cooldown to avoid repeated wake-up requests.
+The camera preview opens the native Suntek P2P live session and sends the wake-up command automatically. LTE wake-up can take from tens of seconds to a few minutes. If live video is not ready yet, the entity still falls back to the newest JPEG image available from the Suntek cloud file list.
 
 The cloud connection binary sensor only means that the Suntek command endpoint responded. The real camera information is exposed through the camera status sensors, based on the last status payload returned by the Suntek cloud.
 
@@ -105,7 +105,7 @@ The integration registers the card resource automatically when Home Assistant da
 If the card does not appear in the picker, add this JavaScript module resource in Home Assistant dashboards:
 
 ```text
-/suntek_lte_camera/frontend/suntek-camera-card.js?v=0.4.0
+/suntek_lte_camera/frontend/suntek-camera-card.js?v=0.4.1
 ```
 
 Manual YAML example:

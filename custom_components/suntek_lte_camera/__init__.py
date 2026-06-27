@@ -35,6 +35,8 @@ from .const import (
     CONF_MEDIA_BACKUP_INTERVAL,
     CONF_MEDIA_BACKUP_LIMIT,
     CONF_PASSWORD,
+    CONF_P2P_API,
+    CONF_P2P_DID,
     CONF_SCAN_INTERVAL,
     CONF_SERVER_ADDR,
     DEFAULT_MEDIA_BACKUP_INTERVAL,
@@ -136,6 +138,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         server_addr=_entry_value(entry, CONF_SERVER_ADDR),
         password=_entry_value(entry, CONF_PASSWORD, ""),
         cloud_device_id=_entry_value(entry, CONF_CLOUD_DEVICE_ID, ""),
+        p2p_did=_entry_value(entry, CONF_P2P_DID, ""),
+        p2p_api=_entry_value(entry, CONF_P2P_API, ""),
     )
     coordinator = SuntekDataUpdateCoordinator(
         hass,

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 import logging
 from pathlib import Path
+import queue
+import threading
 
+from aiohttp import web
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -22,9 +27,11 @@ from .const import (
 )
 from .coordinator import SuntekRuntimeData
 from .entity import device_info, entry_value
+from .live import SuntekP2PLiveClient
 
 _LOGGER = logging.getLogger(__name__)
 _FALLBACK_IMAGE = Path(__file__).parent / "brand" / "logo.png"
+_MJPEG_BOUNDARY = b"suntekframe"
 
 
 async def async_setup_entry(
@@ -40,7 +47,6 @@ class SuntekCamera(Camera):
 
     _attr_has_entity_name = True
     _attr_translation_key = "camera"
-    _attr_content_type = "image/png"
 
     def __init__(self, runtime: SuntekRuntimeData, entry: ConfigEntry) -> None:
         super().__init__()
@@ -48,10 +54,9 @@ class SuntekCamera(Camera):
         self._entry = entry
         self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_camera"
         self._attr_device_info = device_info(entry)
+        has_stream = bool(entry_value(entry, CONF_STREAM_URL_TEMPLATE, ""))
         self._attr_supported_features = (
-            CameraEntityFeature.STREAM
-            if entry_value(entry, CONF_STREAM_URL_TEMPLATE, "")
-            else CameraEntityFeature(0)
+            CameraEntityFeature.STREAM if has_stream else CameraEntityFeature(0)
         )
 
     @property
@@ -78,6 +83,96 @@ class SuntekCamera(Camera):
 
         return self._runtime.client.render_url_template(template)
 
+    async def handle_async_mjpeg_stream(
+        self, request: web.Request
+    ) -> web.StreamResponse | None:
+        """Handle a Home Assistant MJPEG stream using the native Suntek P2P path."""
+        if entry_value(self._entry, CONF_STREAM_URL_TEMPLATE, ""):
+            return None
+
+        did = self._runtime.client.p2p_did
+        if not did:
+            return None
+
+        if entry_value(self._entry, CONF_WAKE_BEFORE_STREAM, True):
+            cooldown = int(
+                entry_value(
+                    self._entry, CONF_WAKE_COOLDOWN, DEFAULT_WAKE_COOLDOWN
+                )
+            )
+            with suppress(SuntekApiError):
+                await self._runtime.client.async_wakeup(cooldown=cooldown)
+
+        password_hash = await self._runtime.client.async_effective_password()
+        response = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": (
+                    "multipart/x-mixed-replace; "
+                    f"boundary={_MJPEG_BOUNDARY.decode()}"
+                ),
+                "Cache-Control": "no-cache",
+            },
+        )
+        await response.prepare(request)
+
+        frame_queue: queue.Queue[bytes | Exception | None] = queue.Queue(maxsize=2)
+        stop_event = threading.Event()
+        live_client = SuntekP2PLiveClient(
+            did,
+            self._runtime.client.p2p_api,
+            password_hash,
+        )
+
+        def _worker() -> None:
+            try:
+                for frame in live_client.iter_jpeg_frames(stop_event):
+                    if stop_event.is_set():
+                        break
+                    try:
+                        frame_queue.put(frame, timeout=1)
+                    except queue.Full:
+                        continue
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Suntek P2P live stream failed: %s", err)
+                with suppress(queue.Full):
+                    frame_queue.put(err, timeout=1)
+            finally:
+                live_client.close()
+                with suppress(queue.Full):
+                    frame_queue.put(None, timeout=1)
+
+        thread = threading.Thread(
+            target=_worker,
+            name=f"suntek-live-{self._entry.entry_id}",
+            daemon=True,
+        )
+        thread.start()
+
+        try:
+            while not stop_event.is_set():
+                item = await self.hass.async_add_executor_job(frame_queue.get)
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    break
+                await response.write(
+                    b"--"
+                    + _MJPEG_BOUNDARY
+                    + b"\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                    + str(len(item)).encode()
+                    + b"\r\n\r\n"
+                    + item
+                    + b"\r\n"
+                )
+        except (asyncio.CancelledError, ConnectionResetError):
+            raise
+        finally:
+            stop_event.set()
+            live_client.close()
+
+        return response
+
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
@@ -91,7 +186,7 @@ class SuntekCamera(Camera):
         try:
             url = self._runtime.client.render_url_template(template)
             data = await self._runtime.client.async_fetch_bytes(url)
-            self._attr_content_type = _content_type(data)
+            self.content_type = _content_type(data)
             return data
         except SuntekApiError as err:
             _LOGGER.warning("Suntek still image fetch failed: %s", err)
@@ -104,7 +199,7 @@ class SuntekCamera(Camera):
             _LOGGER.debug("Suntek latest image fetch failed: %s", err)
             data = await self.hass.async_add_executor_job(_read_fallback_image)
 
-        self._attr_content_type = _content_type(data)
+        self.content_type = _content_type(data)
         return data
 
     async def _async_wakeup_for_preview(self) -> None:

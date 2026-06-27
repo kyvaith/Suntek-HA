@@ -12,6 +12,8 @@ DEFAULT_MEDIA_BACKUP_LIMIT = 100
 
 CONF_DEVICE_ID = "device_id"
 CONF_CLOUD_DEVICE_ID = "cloud_device_id"
+CONF_P2P_DID = "p2p_did"
+CONF_P2P_API = "p2p_api"
 CONF_LOGIN = "login"
 CONF_NAME = "name"
 CONF_PASSWORD = "password"
