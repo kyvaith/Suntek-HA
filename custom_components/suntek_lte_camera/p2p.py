@@ -378,6 +378,11 @@ def build_alive_packet() -> bytes:
     return build_control_packet(PACKET_ALIVE)
 
 
+def build_alive_ack_packet() -> bytes:
+    """Build a session keepalive acknowledgement packet."""
+    return build_control_packet(PACKET_ALIVE_ACK)
+
+
 def build_punch_packet(did: str | P2PDid) -> bytes:
     """Build the plain Punch packet sent to a peer endpoint."""
     parsed = did if isinstance(did, P2PDid) else parse_did(did)
@@ -510,19 +515,19 @@ def parse_app_command_frame(payload: bytes) -> tuple[int, bytes] | None:
     return payload[4], data.rstrip(b"\x00")
 
 
-def build_login_command(password_hash: str) -> bytes:
+def build_login_command(password: str) -> bytes:
     """Build the Suntek application login JSON sent as native command id 3."""
-    return _json_command({"cmd": "LoginDev", "pwd": password_hash})
+    return _json_command({"cmd": "LoginDev", "pwd": password})
 
 
 def build_open_video_command(
-    password_hash: str, *, user_id: int = 0, state: int = 1
+    password: str, *, user_id: int = 0, state: int = 1
 ) -> bytes:
     """Build the Suntek OpenVideo JSON sent after application login."""
     return _json_command(
         {
             "cmd": "OpenVideo",
-            "pwd": password_hash,
+            "pwd": password,
             "userid": user_id,
             "state": state,
         }

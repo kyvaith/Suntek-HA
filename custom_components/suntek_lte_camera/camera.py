@@ -117,6 +117,8 @@ class SuntekCamera(Camera):
         if keepalive_image:
             await _async_write_mjpeg_frame(response, keepalive_image)
 
+        live_password = await self._runtime.client.async_live_password()
+
         if entry_value(self._entry, CONF_WAKE_BEFORE_STREAM, True):
             cooldown = int(
                 entry_value(
@@ -126,13 +128,12 @@ class SuntekCamera(Camera):
             with suppress(SuntekApiError):
                 await self._runtime.client.async_wakeup(cooldown=cooldown)
 
-        password_hash = await self._runtime.client.async_effective_password()
         frame_queue: queue.Queue[bytes | Exception | None] = queue.Queue(maxsize=2)
         stop_event = threading.Event()
         live_client = SuntekP2PLiveClient(
             did,
             self._runtime.client.p2p_api,
-            password_hash,
+            live_password,
         )
 
         def _worker() -> None:

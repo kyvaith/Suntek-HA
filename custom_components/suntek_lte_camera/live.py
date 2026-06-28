@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Iterator
 import logging
 import socket
@@ -11,6 +12,7 @@ import time
 from .p2p import (
     APP_COMMAND_CHANNEL,
     APP_VIDEO_COMMAND_ID,
+    PACKET_ALIVE,
     PACKET_ALIVE_ACK,
     PACKET_DATA,
     PACKET_HELLO_ACK,
@@ -24,6 +26,7 @@ from .p2p import (
     PACKET_RELAY_READY,
     PACKET_RELAY_TO,
     P2P_REQUEST_ACCEPTED,
+    build_alive_ack_packet,
     build_alive_packet,
     build_app_command_frame,
     build_data_ack_packet,
@@ -77,13 +80,13 @@ class SuntekP2PLiveClient:
         self,
         did: str,
         device_api: str | None,
-        password_hash: str,
+        password: str,
         *,
         connect_timeout: float = 360.0,
         stream_timeout: float = 240.0,
     ) -> None:
         self.did = did
-        self.password_hash = password_hash
+        self.password = password
         self.profile = profiles_for_device_api(
             device_api, include_fallback=False
         )[0]
@@ -259,13 +262,15 @@ class SuntekP2PLiveClient:
     ) -> Iterator[bytes]:
         sequence = 0
         jpg_buffer = bytearray()
+        recent_media_sequences: set[int] = set()
+        media_sequence_order: deque[int] = deque()
         next_alive = 0.0
         deadline = time.monotonic() + self.stream_timeout
         logged_non_jpeg = False
 
         for command in (
-            build_login_command(self.password_hash),
-            build_open_video_command(self.password_hash),
+            build_login_command(self.password),
+            build_open_video_command(self.password),
         ):
             self._send(
                 sock,
@@ -301,6 +306,10 @@ class SuntekP2PLiveClient:
             if packet.packet_type == PACKET_ALIVE_ACK:
                 continue
 
+            if packet.packet_type == PACKET_ALIVE:
+                self._send(sock, build_alive_ack_packet(), address)
+                continue
+
             if packet.packet_type != PACKET_DATA:
                 continue
 
@@ -331,6 +340,14 @@ class SuntekP2PLiveClient:
                     app_payload.decode("utf-8", "replace"),
                 )
                 continue
+
+            if data_packet.channel != APP_COMMAND_CHANNEL:
+                if data_packet.sequence in recent_media_sequences:
+                    continue
+                recent_media_sequences.add(data_packet.sequence)
+                media_sequence_order.append(data_packet.sequence)
+                if len(media_sequence_order) > 4096:
+                    recent_media_sequences.discard(media_sequence_order.popleft())
 
             if b"\xff\xd8" not in payload and not logged_non_jpeg:
                 _LOGGER.debug(

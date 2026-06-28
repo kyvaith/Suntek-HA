@@ -758,6 +758,17 @@ class SuntekCloudClient:
             return password.lower()
         return _md5(password)
 
+    async def async_live_password(self) -> str:
+        """Return the cloud password hash used by the native live-view login."""
+        try:
+            await self.async_query_device()
+        except SuntekApiError as err:
+            _LOGGER.debug(
+                "Suntek live metadata refresh failed, using cached server: %s",
+                err,
+            )
+        return await self.async_effective_password()
+
     async def async_query_device(self, password: str | None = None) -> dict[str, Any]:
         """Query device metadata from the 4gcardv cloud."""
         effective_password = (
