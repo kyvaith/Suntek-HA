@@ -10,12 +10,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import (
-    CoreState,
-    EVENT_HOMEASSISTANT_STARTED,
-    HomeAssistant,
-    ServiceCall,
-)
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -87,7 +82,7 @@ SYNC_CLOUD_MEDIA_SCHEMA = vol.Schema(
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up services for Suntek LTE Camera."""
     hass.data.setdefault(DOMAIN, {})
-    _async_schedule_frontend(hass)
+    await _async_register_frontend(hass)
 
     async def handle_wakeup(call: ServiceCall) -> None:
         content = call.data[ATTR_CONTENT]
@@ -231,13 +226,6 @@ def _async_schedule_media_backup(
     )
 
 
-def _async_schedule_frontend(hass: HomeAssistant) -> None:
-    """Register frontend resources after Lovelace has initialized."""
-    if hass.state == CoreState.running:
-        hass.async_create_task(SuntekFrontend(hass).async_register())
-        return
-
-    hass.bus.async_listen_once(
-        EVENT_HOMEASSISTANT_STARTED,
-        lambda _event: hass.async_create_task(SuntekFrontend(hass).async_register()),
-    )
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Register frontend resources."""
+    await SuntekFrontend(hass).async_register()

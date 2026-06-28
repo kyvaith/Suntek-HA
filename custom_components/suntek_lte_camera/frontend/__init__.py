@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).parent
 FRONTEND_URL = f"/{DOMAIN}/frontend"
 FRONTEND_CARD = "suntek-camera-card.js"
-FRONTEND_VERSION = "0.4.2"
+FRONTEND_VERSION = "0.4.5"
 FRONTEND_CARD_URL = f"{FRONTEND_URL}/{FRONTEND_CARD}?v={FRONTEND_VERSION}"
 MAX_RESOURCE_REGISTRATION_ATTEMPTS = 12
 
@@ -109,10 +109,7 @@ class SuntekFrontend:
             return
 
         _LOGGER.debug("%s; retrying", reason)
-        async_call_later(
-            self.hass,
-            5,
-            lambda _now: self.hass.async_create_task(
-                self._async_register_lovelace_resource()
-            ),
-        )
+        async def _async_retry(_now) -> None:
+            await self._async_register_lovelace_resource()
+
+        async_call_later(self.hass, 5, _async_retry)
