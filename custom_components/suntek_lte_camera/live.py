@@ -138,6 +138,7 @@ class SuntekP2PLiveClient:
         hello_servers: set[tuple[str, int]] = set()
         peer_candidates: set[tuple[str, int]] = set()
         relay_candidates: set[tuple[str, int]] = set()
+        request_statuses: dict[int, str] = {}
         next_periodic = 0.0
         next_relay_hello = 0.0
         deadline = time.monotonic() + self.connect_timeout
@@ -185,6 +186,7 @@ class SuntekP2PLiveClient:
                     address,
                     ack.status_text,
                 )
+                request_statuses[ack.status] = ack.status_text
                 if ack.status == P2P_REQUEST_ACCEPTED:
                     continue
 
@@ -251,7 +253,8 @@ class SuntekP2PLiveClient:
         raise SuntekP2PLiveError(
             "Timed out waiting for Suntek P2P live session "
             f"(hello={len(hello_servers)}, peers={len(peer_candidates)}, "
-            f"relays={len(relay_candidates)})"
+            f"relays={len(relay_candidates)}, "
+            f"acks={_format_request_statuses(request_statuses)})"
         )
 
     def _iter_jpeg_frames(
@@ -382,3 +385,12 @@ class SuntekP2PLiveClient:
         last = min(65535, port + _PUNCH_PORT_SPAN)
         for candidate_port in range(first, last + 1):
             candidates.add((host, candidate_port))
+
+
+def _format_request_statuses(statuses: dict[int, str]) -> str:
+    if not statuses:
+        return "none"
+    return ", ".join(
+        f"{status} {text}" if text else str(status)
+        for status, text in sorted(statuses.items())
+    )

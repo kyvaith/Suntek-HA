@@ -693,6 +693,20 @@ class SuntekCloudClient:
         raise_for_ret_code(data)
         return data
 
+    async def async_query_device_status(self, status_id: int = 1003) -> dict[str, Any]:
+        """Call the device status endpoint used by the APK before live view."""
+        url = legacy_signed_url(
+            {
+                "id": int(status_id),
+                "imei": self.device_id,
+                "timestamp": int(time.time()),
+            },
+            f"{self.server_addr}/deviceApi/api/queryDeviceStatus",
+        )
+        data = await self._async_get_json(url)
+        raise_for_ret_code(data)
+        return data
+
     async def async_wakeup(
         self,
         content: int = DEFAULT_WAKE_COMMAND,

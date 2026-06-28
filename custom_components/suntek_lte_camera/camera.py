@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 import queue
 import threading
+import time
 from urllib.parse import quote
 
 from aiohttp import web
@@ -35,6 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 _FALLBACK_IMAGE = Path(__file__).parent / "brand" / "logo.png"
 _MJPEG_BOUNDARY = b"suntekframe"
 _STREAM_KEEPALIVE_SECONDS = 5.0
+_LIVE_WAKE_RETRY_SECONDS = 30.0
 _QUEUE_EMPTY = object()
 
 
@@ -116,6 +118,8 @@ class SuntekCamera(Camera):
         if not did:
             return None
 
+        _LOGGER.warning("Suntek native live stream requested; waiting for P2P session")
+
         response = web.StreamResponse(
             status=200,
             headers={
@@ -138,14 +142,12 @@ class SuntekCamera(Camera):
 
         live_password = await self._runtime.client.async_live_password()
 
-        if entry_value(self._entry, CONF_WAKE_BEFORE_STREAM, True):
-            cooldown = int(
-                entry_value(
-                    self._entry, CONF_WAKE_COOLDOWN, DEFAULT_WAKE_COOLDOWN
-                )
-            )
-            with suppress(SuntekApiError):
-                await self._runtime.client.async_wakeup(cooldown=cooldown)
+        wake_before_stream = entry_value(self._entry, CONF_WAKE_BEFORE_STREAM, True)
+        cooldown = int(
+            entry_value(self._entry, CONF_WAKE_COOLDOWN, DEFAULT_WAKE_COOLDOWN)
+        )
+        if wake_before_stream:
+            await self._async_prepare_live_stream(cooldown)
 
         frame_queue: queue.Queue[bytes | Exception | None] = queue.Queue(maxsize=2)
         stop_event = threading.Event()
@@ -182,6 +184,8 @@ class SuntekCamera(Camera):
         )
         thread.start()
 
+        first_live_frame = True
+        next_wakeup_retry = time.monotonic() + _LIVE_WAKE_RETRY_SECONDS
         try:
             while not stop_event.is_set():
                 item = await self.hass.async_add_executor_job(
@@ -190,12 +194,20 @@ class SuntekCamera(Camera):
                 if item is _QUEUE_EMPTY:
                     if keepalive_image:
                         await _async_write_mjpeg_frame(response, keepalive_image)
+                    if wake_before_stream and time.monotonic() >= next_wakeup_retry:
+                        await self._async_retry_live_wakeup()
+                        next_wakeup_retry = (
+                            time.monotonic() + _LIVE_WAKE_RETRY_SECONDS
+                        )
                     continue
                 if item is None:
                     break
                 if isinstance(item, Exception):
                     break
                 keepalive_image = item
+                if first_live_frame:
+                    _LOGGER.warning("Suntek native live stream delivered first frame")
+                    first_live_frame = False
                 await _async_write_mjpeg_frame(response, item)
         except (asyncio.CancelledError, ConnectionResetError):
             raise
@@ -204,6 +216,49 @@ class SuntekCamera(Camera):
             live_client.close()
 
         return response
+
+    async def _async_prepare_live_stream(self, cooldown: int) -> None:
+        """Mimic the APK's wake/status preflight before opening P2P live."""
+        try:
+            wake = await self._runtime.client.async_wakeup(
+                cooldown=cooldown,
+                force=True,
+            )
+            _LOGGER.warning(
+                "Suntek live wakeup sent before stream: retCode=%s",
+                wake.get("retCode"),
+            )
+        except SuntekApiError as err:
+            _LOGGER.warning("Suntek wakeup before stream failed: %s", err)
+
+        try:
+            status = await self._runtime.client.async_query_device_status(1003)
+            _LOGGER.info(
+                "Suntek live device status 1003 returned %s",
+                status.get("data"),
+            )
+        except SuntekApiError as err:
+            _LOGGER.debug("Suntek live device status check failed: %s", err)
+
+        try:
+            online = await self._runtime.client.async_check_online()
+            _LOGGER.info(
+                "Suntek live checkOnline returned %s",
+                online.get("data"),
+            )
+        except SuntekApiError as err:
+            _LOGGER.debug("Suntek live checkOnline failed: %s", err)
+
+    async def _async_retry_live_wakeup(self) -> None:
+        """Nudge the camera while the P2P bootstrap reports waiting for device."""
+        try:
+            wake = await self._runtime.client.async_wakeup(force=True)
+            _LOGGER.warning(
+                "Suntek live wakeup retry sent while waiting for P2P: retCode=%s",
+                wake.get("retCode"),
+            )
+        except SuntekApiError as err:
+            _LOGGER.warning("Suntek live wakeup retry failed: %s", err)
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
