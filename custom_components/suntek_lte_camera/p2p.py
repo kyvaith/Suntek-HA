@@ -37,8 +37,12 @@ PACKET_ALIVE: Final = 0xE0
 PACKET_ALIVE_ACK: Final = 0xE1
 
 P2P_REQUEST_ACCEPTED: Final = 0x00
+APP_COMMAND_CHANNEL: Final = 1
+APP_VIDEO_COMMAND_ID: Final = 3
 
 _CONTROL_MAGIC: Final = 0xF1
+_APP_COMMAND_MAGIC: Final = b"\xA0\xAF\xAF\xAF"
+_APP_COMMAND_FOOTER: Final = b"\xF4\xF3\xF2\xF1"
 _DID_RE: Final = re.compile(r"^([A-Z]{1,7})-(\d{1,10})-([A-Z0-9]{1,7})$")
 
 _DECODE_TABLE: Final = bytes.fromhex(
@@ -454,8 +458,60 @@ def parse_data_packet(payload: bytes) -> P2PDataPacket:
     )
 
 
+def build_app_command_frame(
+    command_id: int,
+    payload: bytes,
+    *,
+    transaction_id: int | None = None,
+) -> bytes:
+    """Wrap an application JSON command like the native lxIpc command protocol."""
+    if not 0 <= command_id <= 0xFF:
+        raise SuntekP2PError(f"Invalid application command id: {command_id}")
+
+    if transaction_id is None:
+        transaction_id = int(time.monotonic() * 1000) & 0xFFFFFFFF
+    if not 0 <= transaction_id <= 0xFFFFFFFF:
+        raise SuntekP2PError(f"Invalid transaction id: {transaction_id}")
+
+    if not payload.endswith(b"\x00"):
+        payload += b"\x00"
+    if len(payload) > 0xFFFFFFFF:
+        raise SuntekP2PError("Application command payload is too large")
+
+    return (
+        _APP_COMMAND_MAGIC
+        + bytes((command_id, 0))
+        + transaction_id.to_bytes(4, "little")
+        + (b"\x00" * 12)
+        + len(payload).to_bytes(4, "little")
+        + payload
+        + _APP_COMMAND_FOOTER
+    )
+
+
+def parse_app_command_frame(payload: bytes) -> tuple[int, bytes] | None:
+    """Return command id and payload from a native lxIpc command frame."""
+    if (
+        len(payload) < 30
+        or not payload.startswith(_APP_COMMAND_MAGIC)
+        or not payload.endswith(_APP_COMMAND_FOOTER)
+    ):
+        return None
+
+    length = int.from_bytes(payload[22:26], "little")
+    data = payload[26:-4]
+    if len(data) != length:
+        start = data.find(b"{")
+        end = data.rfind(b"}")
+        if start < 0 or end < start:
+            return None
+        data = data[start : end + 1]
+        return payload[4], data
+    return payload[4], data.rstrip(b"\x00")
+
+
 def build_login_command(password_hash: str) -> bytes:
-    """Build the Suntek application login JSON sent on PPCS channel 3."""
+    """Build the Suntek application login JSON sent as native command id 3."""
     return _json_command({"cmd": "LoginDev", "pwd": password_hash})
 
 

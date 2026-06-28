@@ -9,6 +9,8 @@ import threading
 import time
 
 from .p2p import (
+    APP_COMMAND_CHANNEL,
+    APP_VIDEO_COMMAND_ID,
     PACKET_ALIVE_ACK,
     PACKET_DATA,
     PACKET_HELLO_ACK,
@@ -23,6 +25,7 @@ from .p2p import (
     PACKET_RELAY_TO,
     P2P_REQUEST_ACCEPTED,
     build_alive_packet,
+    build_app_command_frame,
     build_data_ack_packet,
     build_data_packet,
     build_hello_packet,
@@ -37,6 +40,7 @@ from .p2p import (
     build_relay_port_packet,
     build_relay_request_packet,
     parse_control_packet,
+    parse_app_command_frame,
     parse_data_packet,
     parse_list_response,
     parse_p2p_request_ack,
@@ -51,7 +55,6 @@ from .p2p import (
 _LOGGER = logging.getLogger(__name__)
 
 _RECV_SIZE = 0x5A0
-_VIDEO_CHANNEL = 3
 _PUNCH_PORT_SPAN = 5
 
 
@@ -266,7 +269,11 @@ class SuntekP2PLiveClient:
         ):
             self._send(
                 sock,
-                build_data_packet(_VIDEO_CHANNEL, sequence, command),
+                build_data_packet(
+                    APP_COMMAND_CHANNEL,
+                    sequence,
+                    build_app_command_frame(APP_VIDEO_COMMAND_ID, command),
+                ),
                 peer,
             )
             sequence = (sequence + 1) & 0xFFFF
@@ -313,6 +320,16 @@ class SuntekP2PLiveClient:
 
             payload = data_packet.payload
             if not payload:
+                continue
+
+            app_command = parse_app_command_frame(payload)
+            if app_command is not None:
+                _command_id, app_payload = app_command
+                _LOGGER.debug(
+                    "Suntek live command response on channel %s: %s",
+                    data_packet.channel,
+                    app_payload.decode("utf-8", "replace"),
+                )
                 continue
 
             if b"\xff\xd8" not in payload and not logged_non_jpeg:
