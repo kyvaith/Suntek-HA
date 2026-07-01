@@ -9,14 +9,12 @@ from pathlib import Path
 import queue
 import threading
 import time
-from urllib.parse import quote
 
 from aiohttp import web
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .api import SuntekApiError
 from .const import (
@@ -62,11 +60,8 @@ class SuntekCamera(Camera):
         self._attr_device_info = device_info(entry)
         self._last_preview_image: bytes | None = None
         has_stream = bool(entry_value(entry, CONF_STREAM_URL_TEMPLATE, ""))
-        has_native_live = bool(runtime.client.p2p_did)
         self._attr_supported_features = (
-            CameraEntityFeature.STREAM
-            if has_stream or has_native_live
-            else CameraEntityFeature(0)
+            CameraEntityFeature.STREAM if has_stream else CameraEntityFeature(0)
         )
 
     @property
@@ -91,21 +86,7 @@ class SuntekCamera(Camera):
         if template:
             return self._runtime.client.render_url_template(template)
 
-        if not self._runtime.client.p2p_did or self.entity_id is None:
-            return None
-
-        try:
-            base_url = get_url(
-                self.hass,
-                allow_external=False,
-                allow_cloud=False,
-                prefer_external=False,
-            )
-        except NoURLAvailableError:
-            base_url = "http://127.0.0.1:8123"
-        entity_id = quote(self.entity_id, safe="")
-        token = quote(self.access_tokens[-1], safe="")
-        return f"{base_url}/api/camera_proxy_stream/{entity_id}?token={token}"
+        return None
 
     async def handle_async_mjpeg_stream(
         self, request: web.Request
