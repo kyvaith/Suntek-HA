@@ -6,7 +6,8 @@ import logging
 from pathlib import Path
 
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
 
 from ..const import DOMAIN
@@ -16,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).parent
 FRONTEND_URL = f"/{DOMAIN}/frontend"
 FRONTEND_CARD = "suntek-camera-card.js"
-FRONTEND_VERSION = "0.4.5"
+FRONTEND_VERSION = "0.4.8"
 FRONTEND_CARD_URL = f"{FRONTEND_URL}/{FRONTEND_CARD}?v={FRONTEND_VERSION}"
 MAX_RESOURCE_REGISTRATION_ATTEMPTS = 12
 
@@ -32,6 +33,14 @@ class SuntekFrontend:
         """Register static files and Lovelace resources."""
         await self._async_register_static_path()
         await self._async_register_lovelace_resource()
+        self.hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED,
+            self._async_register_lovelace_resource_after_start,
+        )
+
+    @callback
+    def _async_register_lovelace_resource_after_start(self, _event: Event) -> None:
+        self.hass.async_create_task(self._async_register_lovelace_resource())
 
     async def _async_register_static_path(self) -> None:
         try:
@@ -47,13 +56,13 @@ class SuntekFrontend:
             self._retry_resource_registration("Lovelace is not ready")
             return
 
-        if getattr(lovelace, "mode", None) != "storage":
-            _LOGGER.debug("Suntek card resource auto-registration needs storage mode")
-            return
-
         resources = getattr(lovelace, "resources", None)
         if resources is None:
             self._retry_resource_registration("Lovelace resources are not ready")
+            return
+
+        if not hasattr(resources, "async_create_item"):
+            _LOGGER.debug("Suntek card resource auto-registration needs storage mode")
             return
 
         if not getattr(resources, "loaded", True):
@@ -75,15 +84,12 @@ class SuntekFrontend:
         return None
 
     async def _async_create_resource(self, resources) -> None:
-        try:
-            await resources.async_create_item(
-                {
-                    "res_type": "module",
-                    "url": FRONTEND_CARD_URL,
-                }
-            )
-        except ValueError as err:
-            _LOGGER.debug("Suntek card resource was not added: %s", err)
+        await _async_resource_call(
+            resources.async_create_item,
+            {"res_type": "module", "url": FRONTEND_CARD_URL},
+            {"type": "module", "url": FRONTEND_CARD_URL},
+            action="added",
+        )
 
     async def _async_update_resource(self, resources, existing: dict) -> None:
         item_id = existing.get("id")
@@ -91,25 +97,45 @@ class SuntekFrontend:
             _LOGGER.debug("Suntek card resource has no editable id")
             return
 
-        try:
-            await resources.async_update_item(
-                item_id,
-                {
-                    "res_type": "module",
-                    "url": FRONTEND_CARD_URL,
-                },
-            )
-        except (AttributeError, TypeError, ValueError) as err:
-            _LOGGER.debug("Suntek card resource was not updated: %s", err)
+        await _async_resource_call(
+            resources.async_update_item,
+            item_id,
+            {"res_type": "module", "url": FRONTEND_CARD_URL},
+            {"type": "module", "url": FRONTEND_CARD_URL},
+            action="updated",
+        )
 
     def _retry_resource_registration(self, reason: str) -> None:
         self._attempts += 1
         if self._attempts > MAX_RESOURCE_REGISTRATION_ATTEMPTS:
-            _LOGGER.debug("%s; giving up", reason)
+            _LOGGER.warning("%s; giving up", reason)
             return
 
         _LOGGER.debug("%s; retrying", reason)
+
         async def _async_retry(_now) -> None:
             await self._async_register_lovelace_resource()
 
         async_call_later(self.hass, 5, _async_retry)
+
+
+async def _async_resource_call(method, *args, action: str) -> None:
+    """Call Lovelace resource APIs across Home Assistant schema variants."""
+    try:
+        await method(*args[:-1])
+        return
+    except (AttributeError, TypeError, ValueError) as err:
+        first_error = err
+
+    try:
+        if len(args) == 3:
+            await method(args[0], args[-1])
+        else:
+            await method(args[-1])
+    except (AttributeError, TypeError, ValueError) as err:
+        _LOGGER.debug(
+            "Suntek card resource was not %s: %s; fallback also failed: %s",
+            action,
+            first_error,
+            err,
+        )

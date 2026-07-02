@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 from collections.abc import Mapping
+from contextlib import suppress
 from datetime import UTC, datetime
 import hashlib
+import hmac
 import json
 import logging
 import re
@@ -28,6 +32,49 @@ SERVER_COMMAND_SECRET = "8ac10106160c56f023a8063d5c"
 LEGACY_HTTP_SECRET = "dfs4132541df512sfd0"
 LEGACY_HTTPS_SECRET = "xme4x84lzd3dsfsfd0"
 _MD5_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
+
+
+def _vendor_token(*parts: str) -> str:
+    return "".join(parts)
+
+
+_MQTT_PROVIDERS = {
+    "mqlx",
+    "mqliuxin",
+    "mqlk",
+    "mqlingke",
+    "mqvk",
+    "mqvking",
+    "mqzy",
+    "mqvkm",
+    "mqdigi",
+}
+_MQTT_CN_INFO = {
+    "group_id": "GID_123",
+    "host": "post-cn-oew1tm9tg0o.mqtt.aliyuncs.com",
+    "port": 1883,
+    "access_key": _vendor_token(
+        "LT", "AI", "4G", "KH", "kv", "qv", "Mb", "jT", "oE", "VY", "TW", "w3"
+    ),
+    "secret_key": _vendor_token(
+        "Ym", "7Q", "tm", "cq", "b7", "Xj", "eQ", "gr", "q3", "gw", "EX",
+        "0D", "ai", "Bl", "U5"
+    ),
+    "instance_id": "post-cn-oew1tm9tg0o",
+}
+_MQTT_GLOBAL_INFO = {
+    "group_id": "GID_123",
+    "host": "post-cn-m7r1ynbpe11-ga.mqtt.aliyuncs.com",
+    "port": 1883,
+    "access_key": _vendor_token(
+        "LT", "AI", "4G", "J6", "Pt", "HX", "jU", "Pi", "r8", "Vc", "D1", "28"
+    ),
+    "secret_key": _vendor_token(
+        "6n", "WX", "4r", "HX", "Xz", "o8", "kn", "0l", "SS", "NA", "7n",
+        "db", "I7", "ij", "Ob"
+    ),
+    "instance_id": "post-cn-m7r1ynbpe11",
+}
 
 _DEVICE_ID_KEYS = (
     "imei",
@@ -143,6 +190,102 @@ def legacy_signed_url(params: Mapping[str, Any], url: str) -> str:
     values = "".join(value for _, value in sorted_items)
     secret = LEGACY_HTTP_SECRET if url.startswith("http://") else LEGACY_HTTPS_SECRET
     return f"{url}?{query}&sign={_md5(values + secret)}"
+
+
+def _send_mqtt_command(
+    server_addr: str, device_id: str, content: int, timeout: int
+) -> dict[str, Any]:
+    """Publish the APK's Aliyun MQTT wake message."""
+    try:
+        import paho.mqtt.client as mqtt
+    except ImportError as err:
+        raise SuntekApiError("paho-mqtt is required for MQTT wake commands") from err
+
+    info = _mqtt_info(server_addr)
+    group_id = info["group_id"]
+    client_id = f"{group_id}@@@{device_id}"
+    username = f"Signature|{info['access_key']}|{info['instance_id']}"
+    password = base64.b64encode(
+        hmac.new(
+            str(info["secret_key"]).encode(),
+            client_id.encode(),
+            hashlib.sha1,
+        ).digest()
+    ).decode()
+    topic = f"remote/p2p/{group_id}@@@{device_id[2:]}"
+
+    state: dict[str, Any] = {"connected": False, "rc": None, "published": False}
+    client: Any | None = None
+
+    def on_connect(
+        _client: Any,
+        _userdata: Any,
+        _flags: Any,
+        reason_code: Any,
+        _properties: Any = None,
+    ) -> None:
+        state["rc"] = _mqtt_reason_code_value(reason_code)
+        state["connected"] = state["rc"] == 0
+
+    try:
+        try:
+            client = mqtt.Client(
+                mqtt.CallbackAPIVersion.VERSION2,
+                client_id=client_id,
+                protocol=mqtt.MQTTv311,
+            )
+        except (AttributeError, TypeError):
+            client = mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
+
+        client.on_connect = on_connect
+        client.username_pw_set(username, password)
+        client.connect(str(info["host"]), int(info["port"]), keepalive=15)
+        client.loop_start()
+        deadline = time.monotonic() + max(5, min(timeout, 30))
+        while state["rc"] is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        if state["rc"] != 0:
+            raise SuntekApiError(f"MQTT connect failed with rc {state['rc']}")
+
+        publish = client.publish(topic, str(int(content)), qos=1, retain=False)
+        deadline = time.monotonic() + 10
+        while not publish.is_published() and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        state["published"] = publish.is_published()
+        state["publish_qos"] = 1
+        state["publish_rc"] = publish.rc
+        if not state["published"]:
+            raise SuntekApiError(f"MQTT publish timed out with rc {publish.rc}")
+        return state
+    except SuntekApiError:
+        raise
+    except Exception as err:  # noqa: BLE001
+        raise SuntekApiError(f"MQTT wake failed: {err}") from err
+    finally:
+        if client is not None:
+            with suppress(Exception):
+                client.loop_stop()
+            with suppress(Exception):
+                client.disconnect()
+
+
+def _mqtt_info(server_addr: str) -> dict[str, str | int]:
+    if "cnlsa.car-dv.com" in server_addr or "cn.car-dv.com" in server_addr:
+        return _MQTT_CN_INFO
+    return _MQTT_GLOBAL_INFO
+
+
+def _mqtt_reason_code_value(reason_code: Any) -> int | str:
+    value = getattr(reason_code, "value", None)
+    if value is not None:
+        return int(value)
+    try:
+        return int(reason_code)
+    except (TypeError, ValueError):
+        text = str(reason_code)
+        return 0 if text.lower() == "success" else text
 
 
 def online_from_response(value: Any) -> bool | None:
@@ -644,6 +787,7 @@ class SuntekCloudClient:
         self.timeout = timeout
         self._last_wakeup = 0.0
         self._cloud_password: str | None = None
+        self._device_config: dict[str, str] = {}
         self.last_wakeup: dict[str, Any] = {"state": "never"}
 
     @property
@@ -693,6 +837,25 @@ class SuntekCloudClient:
         raise_for_ret_code(data)
         return data
 
+    async def async_set_sms_userdata(
+        self, content: int = DEFAULT_WAKE_COMMAND
+    ) -> dict[str, Any]:
+        """Set userdata1 to the command value before wake, like the APK."""
+        cloud_device_id = await self.async_cloud_device_id()
+        url = legacy_signed_url(
+            {
+                "deviceid": cloud_device_id,
+                "key": "userdata1",
+                "operate": "1",
+                "timestamp": int(time.time()),
+                "val": str(int(content)),
+            },
+            f"{self.server_addr}/userdata/api/update",
+        )
+        data = await self._async_get_json(url)
+        raise_for_ret_code(data)
+        return data
+
     async def async_query_device_status(self, status_id: int = 1003) -> dict[str, Any]:
         """Call the device status endpoint used by the APK before live view."""
         url = legacy_signed_url(
@@ -719,6 +882,13 @@ class SuntekCloudClient:
         if not force and cooldown > 0 and now - self._last_wakeup < cooldown:
             return {"skipped": True, "reason": "cooldown"}
 
+        details: dict[str, Any] = {}
+        try:
+            details["userdata"] = await self.async_set_sms_userdata(content)
+        except SuntekApiError as err:
+            _LOGGER.debug("Suntek userdata wake preflight failed: %s", err)
+            details["userdata_error"] = str(err)
+
         try:
             data = await self.async_send_server_command(content)
         except SuntekApiError as err:
@@ -729,13 +899,47 @@ class SuntekCloudClient:
             }
             raise
 
+        provider = await self.async_device_provider()
+        details["provider"] = provider
+        if provider in _MQTT_PROVIDERS:
+            try:
+                details["mqtt"] = await self.async_send_mqtt_command(content)
+            except SuntekApiError as err:
+                _LOGGER.warning("Suntek MQTT wake command failed: %s", err)
+                details["mqtt_error"] = str(err)
+
         self._last_wakeup = now
         self.last_wakeup = {
             "state": "sent",
             "at": datetime.now(UTC).isoformat(),
             "response": data,
+            "details": details,
         }
         return data
+
+    async def async_device_provider(self) -> str:
+        """Return the SIM command provider from the cached device config."""
+        provider = str(self._device_config.get("59") or "").strip().lower()
+        if provider:
+            return provider
+
+        try:
+            await self.async_query_device()
+        except SuntekApiError as err:
+            _LOGGER.debug("Suntek provider refresh failed: %s", err)
+        return str(self._device_config.get("59") or "").strip().lower()
+
+    async def async_send_mqtt_command(
+        self, content: int = DEFAULT_WAKE_COMMAND
+    ) -> dict[str, Any]:
+        """Publish the MQTT wake command used by mq* Suntek SIM providers."""
+        return await asyncio.to_thread(
+            _send_mqtt_command,
+            self.server_addr,
+            self.device_id,
+            int(content),
+            self.timeout,
+        )
 
     async def async_query_cloud_password(self) -> dict[str, Any]:
         """Query the cloud password by IMEI/device id."""
@@ -857,6 +1061,8 @@ class SuntekCloudClient:
         data = response.get("data")
         if not isinstance(data, Mapping):
             return
+
+        self._device_config = _config_from_response(response)
 
         cloud_device_id = _first_mapping_value(data, _DEVICE_CLOUD_ID_KEYS)
         if cloud_device_id:

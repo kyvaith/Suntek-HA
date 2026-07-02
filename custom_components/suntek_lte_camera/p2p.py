@@ -17,9 +17,11 @@ PACKET_HELLO: Final = 0x00
 PACKET_HELLO_ACK: Final = 0x01
 PACKET_P2P_REQUEST: Final = 0x20
 PACKET_P2P_REQUEST_ACK: Final = 0x21
+PACKET_P2P_REQUEST_WI: Final = 0x23
 PACKET_PUNCH_TO: Final = 0x40
 PACKET_PUNCH: Final = 0x41
 PACKET_P2P_READY: Final = 0x42
+PACKET_LIST_REQUEST_WI: Final = 0x66
 PACKET_LIST_REQUEST: Final = 0x67
 PACKET_LIST_RESPONSE: Final = 0x69
 PACKET_RELAY_HELLO: Final = 0x70
@@ -307,6 +309,18 @@ def build_p2p_request_packet(
     return build_control_packet(PACKET_P2P_REQUEST, bytes(payload))
 
 
+def build_p2p_request_wi_packet(
+    did: str | P2PDid,
+    local_port: int,
+    wi_address: tuple[str, int],
+    local_ip: str = "0.0.0.0",
+) -> bytes:
+    """Build the native P2PReqWI packet used by newer LTE devices."""
+    base = bytearray(build_p2p_request_packet(did, local_port, local_ip)[4:])
+    base.extend(encode_sockaddr16(*wi_address))
+    return build_control_packet(PACKET_P2P_REQUEST_WI, bytes(base))
+
+
 def build_p2p_ready_packet(did: str | P2PDid) -> bytes:
     """Build the plain P2PRdy packet used after a punch succeeds."""
     parsed = did if isinstance(did, P2PDid) else parse_did(did)
@@ -325,6 +339,15 @@ def build_list_request_packet(did: str | P2PDid) -> bytes:
     payload[8:12] = parsed.number.to_bytes(4, "big")
     payload[12:19] = _fixed_ascii(parsed.suffix, 7)
     return build_control_packet(PACKET_LIST_REQUEST, bytes(payload))
+
+
+def build_list_request_wi_packet(
+    did: str | P2PDid, wi_address: tuple[str, int]
+) -> bytes:
+    """Build the native ListReq1WI packet used with P2PReqWI."""
+    base = bytearray(build_list_request_packet(did)[4:])
+    base.extend(encode_sockaddr16(*wi_address))
+    return build_control_packet(PACKET_LIST_REQUEST_WI, bytes(base))
 
 
 def build_relay_hello_packet() -> bytes:
@@ -402,6 +425,11 @@ def encode_sockaddr(host: str, port: int) -> bytes:
         + port.to_bytes(2, "big")[::-1]
         + socket.inet_aton(host)[::-1]
     )
+
+
+def encode_sockaddr16(host: str, port: int) -> bytes:
+    """Encode a 16-byte sockaddr_cs2-compatible IPv4 address."""
+    return encode_sockaddr(host, port) + (b"\x00" * 8)
 
 
 def parse_sockaddr(payload: bytes) -> tuple[str, int]:

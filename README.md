@@ -105,7 +105,7 @@ The integration registers the card resource automatically when Home Assistant da
 If the card does not appear in the picker, add this JavaScript module resource in Home Assistant dashboards:
 
 ```text
-/suntek_lte_camera/frontend/suntek-camera-card.js?v=0.4.2
+/suntek_lte_camera/frontend/suntek-camera-card.js?v=0.4.8
 ```
 
 Manual YAML example:

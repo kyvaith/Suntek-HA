@@ -33,10 +33,12 @@ from .p2p import (
     build_data_packet,
     build_hello_packet,
     build_list_request_packet,
+    build_list_request_wi_packet,
     build_login_command,
     build_open_video_command,
     build_p2p_ready_packet,
     build_p2p_request_packet,
+    build_p2p_request_wi_packet,
     build_punch_packet,
     build_relay_hello_packet,
     build_relay_packet,
@@ -45,6 +47,7 @@ from .p2p import (
     parse_control_packet,
     parse_app_command_frame,
     parse_data_packet,
+    parse_hello_ack,
     parse_list_response,
     parse_p2p_request_ack,
     parse_relay_port_ack,
@@ -59,6 +62,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _RECV_SIZE = 0x5A0
 _PUNCH_PORT_SPAN = 5
+_BOOTSTRAP_PROGRESS_SECONDS = 30.0
 
 
 class SuntekP2PLiveError(Exception):
@@ -136,11 +140,13 @@ class SuntekP2PLiveClient:
         ready = build_p2p_ready_packet(self.did)
 
         hello_servers: set[tuple[str, int]] = set()
+        wi_addresses: set[tuple[str, int]] = {("0.0.0.0", local_port)}
         peer_candidates: set[tuple[str, int]] = set()
         relay_candidates: set[tuple[str, int]] = set()
         request_statuses: dict[int, str] = {}
         next_periodic = 0.0
         next_relay_hello = 0.0
+        next_progress_log = time.monotonic() + _BOOTSTRAP_PROGRESS_SECONDS
         deadline = time.monotonic() + self.connect_timeout
 
         for server in self.profile.servers:
@@ -148,10 +154,36 @@ class SuntekP2PLiveClient:
 
         while time.monotonic() < deadline and not stop_event.is_set():
             now = time.monotonic()
+            if now >= next_progress_log:
+                _LOGGER.warning(
+                    (
+                        "Suntek P2P bootstrap progress: hello=%s peers=%s "
+                        "relays=%s acks=%s"
+                    ),
+                    len(hello_servers),
+                    len(peer_candidates),
+                    len(relay_candidates),
+                    _format_request_statuses(request_statuses),
+                )
+                next_progress_log = now + _BOOTSTRAP_PROGRESS_SECONDS
+
             if hello_servers and now >= next_periodic:
                 for server in hello_servers:
                     self._send(sock, p2p_request, server)
                     self._send(sock, list_request, server)
+                    for wi_address in tuple(wi_addresses):
+                        self._send(
+                            sock,
+                            build_p2p_request_wi_packet(
+                                self.did, local_port, wi_address
+                            ),
+                            server,
+                        )
+                        self._send(
+                            sock,
+                            build_list_request_wi_packet(self.did, wi_address),
+                            server,
+                        )
                 for peer in tuple(peer_candidates):
                     self._send(sock, punch, peer)
                     self._send(sock, ready, peer)
@@ -191,6 +223,8 @@ class SuntekP2PLiveClient:
                     continue
 
             if packet.packet_type == PACKET_HELLO_ACK:
+                hello_ack = parse_hello_ack(address, packet.payload)
+                wi_addresses.add(hello_ack.public_address)
                 hello_servers.add(address)
                 next_periodic = 0.0
                 continue

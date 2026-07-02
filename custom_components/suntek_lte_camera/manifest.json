@@ -3,10 +3,10 @@
   "name": "Suntek LTE Camera",
   "codeowners": ["@kyvaith"],
   "config_flow": true,
-  "dependencies": ["frontend", "http"],
+  "dependencies": ["frontend", "http", "lovelace"],
   "documentation": "https://github.com/kyvaith/Suntek-HA",
   "issue_tracker": "https://github.com/kyvaith/Suntek-HA/issues",
   "iot_class": "cloud_polling",
-  "requirements": [],
-  "version": "0.4.7"
+  "requirements": ["paho-mqtt>=1.6.1"],
+  "version": "0.4.8"
 }

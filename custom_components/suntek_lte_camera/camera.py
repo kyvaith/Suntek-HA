@@ -59,7 +59,10 @@ class SuntekCamera(Camera):
         self._attr_unique_id = f"{entry.data[CONF_DEVICE_ID]}_camera"
         self._attr_device_info = device_info(entry)
         self._last_preview_image: bytes | None = None
-        has_stream = bool(entry_value(entry, CONF_STREAM_URL_TEMPLATE, ""))
+        has_stream = bool(
+            entry_value(entry, CONF_STREAM_URL_TEMPLATE, "")
+            or runtime.client.p2p_did
+        )
         self._attr_supported_features = (
             CameraEntityFeature.STREAM if has_stream else CameraEntityFeature(0)
         )
@@ -205,9 +208,24 @@ class SuntekCamera(Camera):
                 cooldown=cooldown,
                 force=True,
             )
+            details = self._runtime.client.last_wakeup.get("details", {})
             _LOGGER.warning(
-                "Suntek live wakeup sent before stream: retCode=%s",
+                (
+                    "Suntek live wakeup sent before stream: retCode=%s "
+                    "provider=%s userdata=%s mqtt=%s"
+                ),
                 wake.get("retCode"),
+                details.get("provider") or "-",
+                _format_wakeup_step(
+                    details.get("userdata"),
+                    details.get("userdata_error"),
+                    ok_key="retCode",
+                ),
+                _format_wakeup_step(
+                    details.get("mqtt"),
+                    details.get("mqtt_error"),
+                    ok_key="published",
+                ),
             )
         except SuntekApiError as err:
             _LOGGER.warning("Suntek wakeup before stream failed: %s", err)
@@ -234,9 +252,24 @@ class SuntekCamera(Camera):
         """Nudge the camera while the P2P bootstrap reports waiting for device."""
         try:
             wake = await self._runtime.client.async_wakeup(force=True)
+            details = self._runtime.client.last_wakeup.get("details", {})
             _LOGGER.warning(
-                "Suntek live wakeup retry sent while waiting for P2P: retCode=%s",
+                (
+                    "Suntek live wakeup retry sent while waiting for P2P: "
+                    "retCode=%s provider=%s userdata=%s mqtt=%s"
+                ),
                 wake.get("retCode"),
+                details.get("provider") or "-",
+                _format_wakeup_step(
+                    details.get("userdata"),
+                    details.get("userdata_error"),
+                    ok_key="retCode",
+                ),
+                _format_wakeup_step(
+                    details.get("mqtt"),
+                    details.get("mqtt_error"),
+                    ok_key="published",
+                ),
             )
         except SuntekApiError as err:
             _LOGGER.warning("Suntek live wakeup retry failed: %s", err)
@@ -303,6 +336,19 @@ def _content_type(data: bytes | None) -> str:
     if data.startswith(b"\x89PNG"):
         return "image/png"
     return "image/jpeg"
+
+
+def _format_wakeup_step(value: object, error: object, *, ok_key: str) -> str:
+    if error:
+        return "error"
+    if not isinstance(value, dict):
+        return "missing"
+    result = value.get(ok_key)
+    if result in (0, True):
+        return "ok"
+    if result is None:
+        return "unknown"
+    return str(result)
 
 
 def _queue_get(
